@@ -1,0 +1,95 @@
+/dts-v1/;
+/*
+ * Minimal device tree embedded in OpenSBI fw_dynamic.bin (FW_FDT_PATH) for the
+ * Sipeed LicheeRV Nano (Sophgo SG2002 = CV1812CP, T-Head C906, 256 MB DDR).
+ *
+ * Derived from the Sophgo/Sipeed SDK (sophgo/duo-buildroot-sdk):
+ *   build/boards/default/dts/cv181x_riscv/cv181x_base_riscv.dtsi  (cpu, plic, clint)
+ *   build/boards/default/dts/cv181x/cv181x_base.dtsi              (uart0 @ 0x04140000, 25 MHz)
+ *   build/boards/default/dts/cv181x/cv181x_default_memmap.dtsi    (memory)
+ *   build/boards/cv181x/cv1812cp_milkv_duo256m_sd/memmap.py       (DRAM 256 MB, top 2 MB = FreeRTOS)
+ *
+ * Differences from the SDK: only what OpenSBI needs. PLIC/CLINT use the
+ * T-Head compatibles so OpenSBI applies the C900 quirks (PLIC S-mode
+ * delegation, CLINT without mtime). The SDK's ION/framebuffer reservations
+ * are omitted: they are U-Boot/Linux allocator regions, not fixed addresses.
+ * OpenSBI adds its own reserved-memory node for 0x80000000..0x80080000.
+ * Interrupt numbers below are from the SDK dtsi (UART0 = PLIC 44).
+ */
+
+/ {
+	model = "Sipeed LicheeRV Nano (Sophgo SG2002)";
+	compatible = "sipeed,licheervnano", "sophgo,sg2002";
+	#address-cells = <2>;
+	#size-cells = <2>;
+
+	aliases {
+		serial0 = &uart0;
+	};
+
+	chosen {
+		stdout-path = "serial0:115200n8";
+	};
+
+	cpus {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		timebase-frequency = <25000000>;
+
+		cpu0: cpu@0 {
+			device_type = "cpu";
+			reg = <0>;
+			status = "okay";
+			compatible = "thead,c906", "riscv";
+			riscv,isa = "rv64imafdcsu";
+			mmu-type = "riscv,sv39";
+			clock-frequency = <25000000>;
+
+			cpu0_intc: interrupt-controller {
+				#interrupt-cells = <1>;
+				interrupt-controller;
+				compatible = "riscv,cpu-intc";
+			};
+		};
+	};
+
+	/* Top 2 MB of the 256 MB is the C906L/FreeRTOS region (cvirtos.bin). */
+	memory@80000000 {
+		device_type = "memory";
+		reg = <0x0 0x80000000 0x0 0x0fe00000>;
+	};
+
+	soc {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		compatible = "simple-bus";
+		ranges;
+
+		plic0: interrupt-controller@70000000 {
+			compatible = "thead,c900-plic";
+			reg = <0x0 0x70000000 0x0 0x4000000>;
+			interrupts-extended = <&cpu0_intc 0xffffffff>, <&cpu0_intc 9>;
+			interrupt-controller;
+			#interrupt-cells = <2>;
+			#address-cells = <0>;
+			riscv,ndev = <101>;
+		};
+
+		clint@74000000 {
+			compatible = "thead,c900-clint";
+			reg = <0x0 0x74000000 0x0 0x10000>;
+			interrupts-extended = <&cpu0_intc 3>, <&cpu0_intc 7>;
+		};
+
+		uart0: serial@4140000 {
+			compatible = "snps,dw-apb-uart";
+			reg = <0x0 0x04140000 0x0 0x1000>;
+			clock-frequency = <25000000>;
+			reg-shift = <2>;
+			reg-io-width = <4>;
+			interrupts = <44 4>;
+			interrupt-parent = <&plic0>;
+			status = "okay";
+		};
+	};
+};
