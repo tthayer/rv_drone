@@ -17,7 +17,7 @@ work can never disturb audio timing.
 ## Hardware
 
 ```
-                          SPI1 + DRQ (audio)
+                          SPI2 + DRQ (audio)
    LicheeRV Nano  ◀──────────────────────────────▶  Pico A (audio)
    DSP + UI state                                    PIO I2S ─▶ PCM5102A
    UART0 ─▶ FTDI (debug)
@@ -34,7 +34,7 @@ work can never disturb audio timing.
 | Function | Part | Where | Interface |
 |---|---|---|---|
 | DSP | LicheeRV Nano B | Nano | C906 @ 1 GHz, RV64GC + RVV 0.7.1, 256 MB DDR |
-| Audio link | — | Nano ⇄ Pico A | SPI, Nano master, mode 3, 8 MHz to start; DRQ from Pico A |
+| Audio link | — | Nano ⇄ Pico A | SPI2, Nano master, mode 3, 8 MHz to start; DRQ from Pico A |
 | Audio out | PCM5102A | Pico A | I2S (PIO), Pico master, 64 fs, no MCLK (SCK tied low) |
 | Panel link | — | Nano ⇄ Pico B | UART, 1.5625 Mbaud 8N1, COBS-framed packets |
 | Displays | 3 × SSD1306 128x64 (as in pseudopod) | Pico B | I2C0: 0x3C + 0x3D; I2C1: 0x3C |
@@ -63,20 +63,43 @@ leaving a/b (left) and j (right) free. Every header GPIO is 3.3 V.
 | L1 | A17 | UART0 RX ← FTDI TX via 1 kΩ / 1.8 kΩ divider |
 | L2 | A16 | UART0 TX → FTDI RX |
 | L3 | GND | common GND |
-| L7 | A24 | SPI1 CS → Pico A GP17 |
-| L8 | A23 | SPI1 MISO ← Pico A GP19 |
 | L9 | A27 | DRQ (GPIO in) ← Pico A GP20 |
-| L10 | A25 | SPI1 MOSI → Pico A GP16 |
-| L11 | A22 | SPI1 SCK → Pico A GP18 |
 | R4 | A29 | UART2 RX ← Pico B GP16 |
 | R6 | A28 | UART2 TX → Pico B GP17 |
+| R7 | P18 | SPI2 CS → Pico A GP17 |
+| R9 | P21 | SPI2 MISO (SDI) ← Pico A GP19 |
+| R10 | P22 | SPI2 MOSI (SDO) → Pico A GP16 |
+| R11 | P23 | SPI2 SCK → Pico A GP18 |
 | R13 | A14 | onboard LED1 (status) |
 
 - **L5/L6 are the speaker amp outputs (VOP/VON).** Never connect anything to
   them.
 - **A28/A29 double as JTAG TDI/TDO.**
-- UNVERIFIED: the SPI1 mux function numbers for A22–A25, and UART2 on
-  A28/A29. Check them against the SDK pinlist before M4/M5.
+**Pinmux, checked against the SDK** (`cv181x_pinlist_swconfig.h`,
+`cv181x_reg_fmux_gpio.h`). FMUX base is 0x03001000:
+
+| Pad (pin) | FMUX offset | Function | Value |
+|---|---|---|---|
+| SD1_D3 (P18) | 0xD0 | SPI2_CS_X | 1 |
+| SD1_D0 (P21) | 0xDC | SPI2_SDI | 1 |
+| SD1_CMD (P22) | 0xE0 | SPI2_SDO | 1 |
+| SD1_CLK (P23) | 0xE4 | SPI2_SCK | 1 |
+| EMMC_DAT3 (A27) | 0x58 | XGPIOA_27 | 3 |
+| IIC0_SCL (A28) | 0x70 | UART2_TX | 2 |
+| IIC0_SDA (A29) | 0x74 | UART2_RX | 2 |
+| SD0_PWR_EN (A14) | 0x38 | XGPIOA_14 (LED) | 3 |
+
+- **Peripherals:**
+  - SPI2 is `snps,dw-apb-ssi` at 0x041A0000, with clock `CV181X_CLK_SPI`.
+  - UART2 is `snps,dw-apb-uart` at 0x04160000, with a 25 MHz clock and
+    reg-shift 2.
+  - Both come from the SDK `cv181x_base.dtsi`.
+- **No SPI on A22–A25.** Those pads are the eMMC pads, and their only SPI
+  functions are SPINOR/SPINAND, the flash controllers. The only SPI
+  exposed on the header is SPI2, on the P pads.
+- **The P pads are in the SD1 I/O domain.** Measure P22 to confirm 3.3 V
+  before connecting Pico A.
+- **Freed:** A22–A26 are free again, as GPIO only.
 
 ### Pico pins (both are Pico 2 W)
 
@@ -90,10 +113,10 @@ the CYW43, so none of those are available on either board.
 | 10 | 14 | I2S BCK → PCM5102A |
 | 11 | 15 | I2S LRCK → PCM5102A |
 | 12 | 16 | I2S DIN → PCM5102A |
-| 16 | 21 | SPI0 RX ← Nano MOSI (A25) |
-| 17 | 22 | SPI0 CSn ← Nano CS (A24) |
-| 18 | 24 | SPI0 SCK ← Nano SCK (A22) |
-| 19 | 25 | SPI0 TX → Nano MISO (A23) |
+| 16 | 21 | SPI0 RX ← Nano MOSI (P22) |
+| 17 | 22 | SPI0 CSn ← Nano CS (P18) |
+| 18 | 24 | SPI0 SCK ← Nano SCK (P23) |
+| 19 | 25 | SPI0 TX → Nano MISO (P21) |
 | 20 | 26 | DRQ → Nano A27 |
 
 Everything else on Pico A is spare (debug LEDs, scope triggers).
@@ -284,7 +307,7 @@ also run on the host (`emu/`).
 
 | Context | Trigger | Work |
 |---|---|---|
-| GPIO IRQ (DRQ rising) | Pico A needs a block | Start the SPI1 TX/RX DMA, sending the already-rendered block |
+| GPIO IRQ (DRQ rising) | Pico A needs a block | Start the SPI2 TX/RX DMA, sending the already-rendered block |
 | SPI DMA-complete IRQ | transfer done | Check the status reply, then render the next block (`engine_render(64)`, 1.33 ms budget) |
 | UART2 RX IRQ | panel bytes | COBS decode, then queue events (encoder, switch, MIDI) for the audio context |
 | Main loop | best effort | UI events → param changes → redraw the framebuffers → queue dirty pages to UART2 TX; preset I/O on SD |
@@ -358,7 +381,7 @@ Synthesis is `float` on the Nano. RVV 0.7.1 is a later optimisation.
 | M1 | Nano UART0 via FTDI; traps, PLIC, SBI timer IRQ | Boot log captured; 1 kHz tick count printed each second |
 | M2 | Pico SDK tree; Pico A PIO I2S at 153.6 MHz sysclk | Clean 440 Hz sine from the PCM5102A, no clicks over 10 min |
 | M3 | Pico B: encoders, switches, 3 OLEDs, MIDI | Events printed over USB CDC; a test pattern on all 3 OLEDs |
-| M4 | Nano pinmux, GPIO IRQ, SPI1 master + DMA, cache handling | Logic-analyser check of SPI1 mode 3 at 8 MHz |
+| M4 | Nano pinmux, GPIO IRQ, SPI2 master + DMA, cache handling | Logic-analyser check of SPI2 mode 3 at 8 MHz |
 | M5 | rvlink end to end | The Nano's sine plays via Pico A; 0 CRC errors and 0 underruns over 10 min |
 | M6 | Nano UART2 + rvpanel end to end | Encoders and MIDI reach the Nano; the Nano draws on all 3 OLEDs |
 | M7 | Drone engine + `emu/` host build | Engine plays on the host, then on hardware via the panel and MIDI |
@@ -396,8 +419,8 @@ Synthesis is `float` on the Nano. RVV 0.7.1 is a later optimisation.
 - PLIC at 0x70000000 and CLINT at 0x74000000 (from the DTS).
 - That UART0 is DW 16550-compatible with a 4-byte stride, and the 25 MHz
   timebase. M1 checks both.
-- That SPI1 is DesignWare SSI, its clock source and mux function numbers,
-  and that it streams back to back in mode 3. M4 checks this.
+- The SPI2 input clock rate (`CV181X_CLK_SPI`), and that it streams back to
+  back in mode 3. M4 checks this.
 - That SD is SDHCI.
 - **The little core is not idle.** fiptool requires `--rtos`, so the FSBL
   loads the vendor `cvirtos.bin` to 0x83F40000 and releases the C906L.

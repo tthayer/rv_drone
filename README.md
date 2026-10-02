@@ -5,7 +5,7 @@ A bare-metal drone synthesizer on three boards:
 | Board | Role |
 |---|---|
 | Sipeed LicheeRV Nano (SG2002, C906 RV64GC) | DSP engine and UI state. Runs in S-mode under OpenSBI. |
-| Pico 2 W "A" (RP2350) | Audio clock master; PIO I2S to a PCM5102A. Linked to the Nano by SPI. |
+| Pico 2 W "A" (RP2350) | Audio clock master; PIO I2S to a PCM5102A. Linked to the Nano by SPI2. |
 | Pico 2 W "B" (RP2350) | Front panel: 6 encoders, 3 SSD1306 OLEDs, MIDI in. Linked to the Nano by UART. |
 
 The design, pin maps, link protocols and milestones are in
