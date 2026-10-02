@@ -6,22 +6,66 @@ up DDR.
 
 ## Hardware
 
-| Function | Part | Interface | SG2002 block | Pins (Nano) |
-|---|---|---|---|---|
-| Compute | LicheeRV Nano | — | C906 @ 1 GHz, RV64GC + RVV 0.7.1, 256 MB DDR | — |
-| Audio out | PCM5102A | I2S, SoC master, no MCLK (SCK tied low → internal PLL) | I2S2 @ 0x04120000 | BCLK=A28, LRCK=A18, DOUT=A19 ⚠ |
-| Display | SSD1306 128x64 (same as pseudopod) | I2C @ 400 kHz, addr 0x3C | I2C1 or I2C3 (header) | TBD from schematic |
-| MIDI in | 3.5 mm TRS Type A → H11L1/6N138 opto | UART RX, 31250 8N1 | UART1 (A29) or UART3 (P20) ⚠ | TBD |
-| Controls | 4–6 rotary encoders w/ push | GPIO, 3 pins each | GPIO0..3 @ 0x03020000 | TBD |
-| Storage | 32 GB microSD, FAT32 | SD | SD0 @ 0x04310000 | on-board slot |
-| Debug | USB-UART | UART0 115200 | UART0 @ 0x04140000 | A16 TX / A17 RX |
+Board: **LicheeRV-Nano-B** (no Ethernet, no Wi-Fi/BT; it does have the
+onboard mic and speaker amp). Pin data comes from the 70405 (rev 1.2)
+schematic,
+https://cn.dl.sipeed.com/fileList/LICHEE/LicheeRV_Nano/02_Schematic/LicheeRV_Nano-70405_Schematic.pdf,
+and the SDK pinlist `cv181x_pinlist_swconfig.h`.
 
-⚠ **Verify before wiring.** The I2S2 pad mapping comes from the SDK pinlist
-(UART2 pads, mux function 6), not from the board schematic. A28 and A29 are
-also UART1's pads. Each pad has its own mux, so A29 *should* stay UART1_RX
-while A28 is IIS2_BCLK. If that doesn't hold, MIDI moves to UART3 on P20.
-Header I/O is 3.3 V per the Sipeed wiki. Confirm that per pin, since the
-PCM5102A, SSD1306 and opto pull-up all assume 3.3 V.
+| Function | Part | Interface | SG2002 block | Pins |
+|---|---|---|---|---|
+| Compute | LicheeRV Nano B | — | C906 @ 1 GHz, RV64GC + RVV 0.7.1, 256 MB DDR | — |
+| Audio out | PCM5102A | I2S, SoC master, no MCLK (SCK tied low → internal PLL) | I2S2 @ 0x04120000 | **Ethernet footprint U7**, mux func 7: BCLK=ETH_TXM, LRCK=ETH_TXP, DOUT=ETH_RXP (ETH_RXM=IIS2_DI, unused) ⚠ |
+| Display | SSD1306 128x64 (same as pseudopod) | I2C @ 400 kHz, addr 0x3C | I2C3 | SCL=P22 (R10), SDA=P23 (R11); external 4.7 kΩ pull-ups |
+| MIDI in | 3.5 mm TRS Type A → H11L1/6N138 opto | UART RX, 31250 8N1 | UART3 | RX=P20 (R12) |
+| Controls | 5 rotary encoders with push | GPIO | GPIO0..3 @ 0x03020000 | see allocation below |
+| Storage | 32 GB microSD, FAT32 | SD | SD0 @ 0x04310000 | on-board slot |
+| Debug | USB-UART | UART0 115200 | UART0 @ 0x04140000 | TX=A16 (L2), RX=A17 (L1) |
+| Status LED | onboard LED1 | GPIO | — | A14 (R13) |
+
+Header naming: L1–L14 is the left column and R1–R14 the right, top to
+bottom, as on schematic sheet 1/4. Every header GPIO is 3.3 V per the
+sheet 1/4 legend (Vio = 3.3 V for GPIOA/B/P).
+
+**Encoder allocation** (A/B are the quadrature inputs, SW is the push switch;
+internal pull-ups, switches to GND):
+
+| Encoder | A | B | SW |
+|---|---|---|---|
+| 1 | A24 (L7) | A23 (L8) | B3 (R5) |
+| 2 | A27 (L9) | A25 (L10) | P18 (R7) |
+| 3 | A22 (L11) | A26 (L12) | P19 (R8) |
+| 4 | A18 (R2) | A19 (R1) | P21 (R9) |
+| 5 | A28 (R6) | A29 (R4) | A15 (L4) ⚠ |
+
+L5/L6 are the speaker amp outputs (VOP/VON). They are unused, and nothing
+may be connected to them.
+
+⚠ **Before wiring:**
+
+- **Audio pads.** The I2S signals exist only on the Ethernet footprint. No
+  edge pin and no Wi-Fi footprint pad has an I2S function. Before we
+  commit to it, check the following on the board itself (the designator
+  drawing helps):
+  - the U7 pad pitch and reachability;
+  - that no magnetics, series capacitors or resistors sit between the pads
+    and the SoC;
+  - that the on-chip ETH PHY can be held off while the pads are muxed
+    to function 7.
+
+  Bring the three wires out to a small header, with short leads. BCLK is
+  about 3 MHz at 48 kHz × 64.
+- **Pad voltages.** Measure the P-pad rail (VDDIO_SD1) on P22 before
+  connecting the OLED or the opto pull-up. The legend says 3.3 V, but it's
+  per-domain.
+- **A15.** This may be the speaker amp enable. Pressing encoder 5's switch
+  would then just toggle an amp we don't use, which is harmless. If it's
+  a problem, encoder 5's switch moves to A14 and we lose the LED.
+- **JTAG.** A18/A19/A28/A29 are also the JTAG pins (TCK/TMS/TDI/TDO).
+  During early bring-up, leave encoders 4–5 unconnected if we want JTAG
+  debugging.
+- **Spare pins.** None are left. A 6th encoder or extra buttons would need
+  an I/O expander on the I2C bus (e.g. MCP23017).
 
 **MIDI input circuit (TRS Type A):** tip = pin 4 (source), ring = pin 5
 (sink). Tip goes through a 220 Ω resistor to the opto LED anode, and ring
@@ -99,7 +143,7 @@ lever on iteration speed. Each hardware test otherwise means rebuilding
 |---|---|---|
 | I2S DMA IRQ (highest) | every 64 frames @ 48 kHz (1.33 ms) | Renders the next half-buffer: drains the param/MIDI queues, then calls `engine_render(64)` into the inactive half |
 | Timer IRQ | 1 kHz | Encoder quadrature decode (state-table, debounced) and button debounce; posts events to the UI queue |
-| UART1 RX IRQ | per byte | MIDI byte goes into the SPSC ring; the parser runs in the audio context |
+| UART3 RX IRQ | per byte | MIDI byte goes into the SPSC ring; the parser runs in the audio context |
 | Main loop | best effort | UI events → param changes (lock-free queue to audio) → redraw the dirty OLED pages over I2C; preset I/O on SD |
 
 - **Audio format:** 48 kHz, 32-bit I2S slots with 24-bit data (the PCM5102A
@@ -147,8 +191,8 @@ lever on iteration speed. Each hardware test otherwise means rebuilding
 | M0 | Toolchain, linker, `start.S`, polled UART0, fip packaging | "rv_drone hello" on UART0 from SD boot (and on QEMU `virt`) |
 | M1 | Traps, PLIC, SBI timer IRQ | 1 kHz tick count printed each second |
 | M2 | Pinmux + GPIO, encoders | Encoder deltas and pushes printed |
-| M3 | I2S2 + DMA, cache handling | Clean 440 Hz sine out of the PCM5102A, no clicks over 10 min |
-| M4 | UART1 MIDI in | Note and CC events printed from a real keyboard |
+| M3 | Wire the U7 pads; I2S2 (ETH pads, mux func 7) + DMA, cache handling | Clean 440 Hz sine out of the PCM5102A, no clicks over 10 min |
+| M4 | UART3 MIDI in (P20) | Note and CC events printed from a real keyboard |
 | M5 | I2C + SSD1306 | Text and page UI on the OLED, with audio running glitch-free |
 | M6 | Drone engine + `emu/` host build | Engine plays on the host, then on hardware via encoders and MIDI |
 | M7 | SDHCI + FatFs presets | Save and load presets across power cycles |
@@ -174,8 +218,9 @@ lever on iteration speed. Each hardware test otherwise means rebuilding
 - That the UART registers are DW 16550-compatible with a 4-byte stride.
 - That I2C is DesignWare and SD is SDHCI (inferred from the Linux drivers).
 - The `loader_2nd` header format and whether LZMA is required.
-- The I2S2 header pinout, and whether A28/A29 can be split between I2S and
-  UART.
+- I2S2 on the Ethernet footprint pads (mux func 7): whether the pads are
+  reachable and whether anything sits between them and the SoC. (Disproven
+  earlier: I2S on A28/A18/A19. Those pads have no IIS function.)
 - **The little core is not idle.** fiptool requires `--rtos`, so the FSBL
   loads the vendor `cvirtos.bin` to 0x83F40000 and releases the C906L. Until
   we replace that image with a tiny parking loop, two things hold:
