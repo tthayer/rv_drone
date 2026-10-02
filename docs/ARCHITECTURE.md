@@ -1,49 +1,55 @@
 # rv_drone — Architecture
 
-A bare-metal drone synthesizer on two boards:
+A bare-metal drone synthesizer on three boards:
 
-- **Sipeed LicheeRV Nano (SG2002)**: runs the DSP engine. No Linux; our
-  binary owns the big C906 core after the vendor boot chain brings up DDR.
-- **Raspberry Pi Pico 2 W (RP2350)**: handles all I/O and owns the audio
-  clock. It drives I2S to the PCM5102A and reads the encoders, MIDI and
-  OLED.
+- **Sipeed LicheeRV Nano (SG2002)**: the DSP engine, and the owner of all
+  synth and UI state. No Linux; our binary owns the big C906 core after the
+  vendor boot chain brings up DDR.
+- **Pico A, a Raspberry Pi Pico 2 W (RP2350)**: audio only. It is the
+  audio clock master and drives PIO I2S to the PCM5102A.
+- **Pico B, a Raspberry Pi Pico 2 W**: the front panel. It handles the
+  encoders, switches, OLEDs and MIDI in.
 
-The two boards are linked by SPI. The Nano header has no I2S pins
-(see "Rejected audio paths"), which is why the I/O lives on the RP2350.
+The Nano header has no usable I2S (see "Rejected audio paths"), which is
+why audio goes through a Pico. The panel is on its own Pico so that UI
+work can never disturb audio timing.
 
 ## Hardware
 
 ```
-      LicheeRV Nano (DSP engine)                   Pico 2 W (I/O + audio clock)
- ┌───────────────────────────────┐   SPI1     ┌───────────────────────────────┐
- │ engine, fx, 256 MB DDR        │  mode 3    │ PIO I2S   ───▶ PCM5102A       │
- │ SPI master + DMA              │◀──────────▶│ PIO quad  ◀─── 6 encoders     │
- │                               │◀── DRQ ────│ UART1 RX  ◀─── MIDI opto      │
- │ UART0 debug ─▶ FTDI           │            │ I2C0      ───▶ SSD1306        │
- └───────────────────────────────┘            └───────────────────────────────┘
-                 └──────────────── common GND ────────────────┘
+                          SPI1 + DRQ (audio)
+   LicheeRV Nano  ◀──────────────────────────────▶  Pico A (audio)
+   DSP + UI state                                    PIO I2S ─▶ PCM5102A
+   UART0 ─▶ FTDI (debug)
+        ▲
+        │ UART2, 1.5625 Mbaud (panel link)
+        ▼
+   Pico B (panel)
+     6 encoders: A/B on PIO, switches on GPIO
+     I2C0: OLED 0 (0x3C) + OLED 1 (0x3D)    I2C1: OLED 2 (0x3C)
+     UART1 RX ◀─ MIDI opto
+   ───────────────────── common GND across all four boards and the FTDI ─────
 ```
 
 | Function | Part | Where | Interface |
 |---|---|---|---|
 | DSP | LicheeRV Nano B | Nano | C906 @ 1 GHz, RV64GC + RVV 0.7.1, 256 MB DDR |
-| Link | — | Nano ⇄ Pico | SPI, Nano master, mode 3, 8 MHz to start; DRQ from Pico |
-| Audio out | PCM5102A | Pico | I2S (PIO), Pico master, 64 fs, no MCLK (SCK tied low) |
-| Displays | 3 × SSD1306 128x64 (as in pseudopod) | Pico | I2C0 → TCA9548A mux (0x70), channels 0–2, 0x3C each |
-| MIDI in | 3.5 mm TRS Type A → H11L1/6N138 opto | Pico | UART1 RX, 31250 8N1 |
-| Controls | 6 rotary encoders with push | Pico | A/B: PIO quadrature; switches: MCP23017 |
+| Audio link | — | Nano ⇄ Pico A | SPI, Nano master, mode 3, 8 MHz to start; DRQ from Pico A |
+| Audio out | PCM5102A | Pico A | I2S (PIO), Pico master, 64 fs, no MCLK (SCK tied low) |
+| Panel link | — | Nano ⇄ Pico B | UART, 1.5625 Mbaud 8N1, COBS-framed packets |
+| Displays | 3 × SSD1306 128x64 (as in pseudopod) | Pico B | I2C0: 0x3C + 0x3D; I2C1: 0x3C |
+| Controls | 6 rotary encoders with push | Pico B | PIO quadrature + GPIO |
+| MIDI in | 3.5 mm TRS Type A → H11L1/6N138 opto | Pico B | UART1 RX, 31250 8N1 |
 | Storage | 32 GB microSD, FAT32 | Nano | SD0 (on-board slot) |
-| Debug | FTDI adapter (5 V; divider on its TX) / USB CDC | Nano UART0 / Pico USB | 115200 |
+| Debug | FTDI adapter (5 V; divider on its TX) / USB CDC | Nano UART0 / Picos USB | 115200 |
 
-The OLEDs are on the Pico, behind a TCA9548A I2C mux, because each
-SSD1306 only offers 0x3C or 0x3D. The mux takes no extra pins and has room
-for up to 8 displays. The Nano renders a 1 KB framebuffer per display and streams
-dirty pages across the link, one 128-byte page per block.
-
-Budget: 750 pages/s ≈ 94 full frames/s across all displays, so about
-30 fps each with 3. Most frames change only a few pages, so the real rate
-is higher. On the I2C side, 400 kHz gives about 25 ms per
-full frame. SSD1306s usually tolerate 1 MHz, so we try that. 
+⚠ **OLED 1 must be moved to 0x3D.** On most SSD1306 modules that means
+moving the 0 Ω "IIC ADDRESS SELECT" resistor on the back from the 0x78
+position to the 0x7A position. That is SMD work. Bridging the 0x7A pads
+with a solder blob, after lifting the original resistor, is often enough.
+If it isn't practical, OLED 1 goes on a third bus run by PIO-based I2C
+using the spare GP9 plus one switch pin. That switch then moves to an
+ADC-ladder input.
 
 ### Nano pins
 
@@ -56,55 +62,70 @@ leaving a/b (left) and j (right) free. Every header GPIO is 3.3 V.
 |---|---|---|
 | L1 | A17 | UART0 RX ← FTDI TX via 1 kΩ / 1.8 kΩ divider |
 | L2 | A16 | UART0 TX → FTDI RX |
-| L3 | GND | common GND (FTDI, Pico) |
-| L7 | A24 | SPI1 CS → Pico GP17 |
-| L8 | A23 | SPI1 MISO ← Pico GP19 |
-| L9 | A27 | DRQ (GPIO in) ← Pico GP20 |
-| L10 | A25 | SPI1 MOSI → Pico GP16 |
-| L11 | A22 | SPI1 SCK → Pico GP18 |
+| L3 | GND | common GND |
+| L7 | A24 | SPI1 CS → Pico A GP17 |
+| L8 | A23 | SPI1 MISO ← Pico A GP19 |
+| L9 | A27 | DRQ (GPIO in) ← Pico A GP20 |
+| L10 | A25 | SPI1 MOSI → Pico A GP16 |
+| L11 | A22 | SPI1 SCK → Pico A GP18 |
+| R4 | A29 | UART2 RX ← Pico B GP16 |
+| R6 | A28 | UART2 TX → Pico B GP17 |
 | R13 | A14 | onboard LED1 (status) |
 
 - **L5/L6 are the speaker amp outputs (VOP/VON).** Never connect anything to
   them.
-- Everything else is spare.
-- UNVERIFIED: the SPI1 mux function number for each of A22–A25. Check the
-  SDK pinlist before M4.
+- **A28/A29 double as JTAG TDI/TDO.**
+- UNVERIFIED: the SPI1 mux function numbers for A22–A25, and UART2 on
+  A28/A29. Check them against the SDK pinlist before M4/M5.
 
-### Pico 2 W pins
+### Pico pins (both are Pico 2 W)
 
 GP23/24/25/29 belong to the CYW43 wireless chip, and the onboard LED is on
-the CYW43, so none of those are available. That leaves 26 GPIOs, of
-which 2 are spare:
+the CYW43, so none of those are available on either board.
+
+**Pico A (audio):**
+
+| GP | Pico pin | Use |
+|---|---|---|
+| 10 | 14 | I2S BCK → PCM5102A |
+| 11 | 15 | I2S LRCK → PCM5102A |
+| 12 | 16 | I2S DIN → PCM5102A |
+| 16 | 21 | SPI0 RX ← Nano MOSI (A25) |
+| 17 | 22 | SPI0 CSn ← Nano CS (A24) |
+| 18 | 24 | SPI0 SCK ← Nano SCK (A22) |
+| 19 | 25 | SPI0 TX → Nano MISO (A23) |
+| 20 | 26 | DRQ → Nano A27 |
+
+Everything else on Pico A is spare (debug LEDs, scope triggers).
+
+**Pico B (panel).** 25 of 26 GPIOs are used:
 
 | GP | Pico pin | Use | GP | Pico pin | Use |
 |---|---|---|---|---|---|
-| 0 | 1 | Enc 1 A | 14 | 19 | Enc 4 B |
-| 1 | 2 | Enc 1 B | 15 | 20 | spare |
-| 2 | 4 | Enc 2 A | 16 | 21 | SPI0 RX ← Nano MOSI |
-| 3 | 5 | Enc 2 B | 17 | 22 | SPI0 CSn ← Nano CS |
-| 4 | 6 | I2C0 SDA (mux + MCP23017) | 18 | 24 | SPI0 SCK ← Nano SCK |
-| 5 | 7 | I2C0 SCL (mux + MCP23017) | 19 | 25 | SPI0 TX → Nano MISO |
-| 6 | 9 | Enc 3 A | 20 | 26 | DRQ → Nano A27 |
-| 7 | 10 | Enc 3 B | 21 | 27 | Enc 5 A |
-| 8 | 11 | MCP23017 INTA (switch change) | 22 | 29 | Enc 5 B |
-| 9 | 12 | UART1 RX ← MIDI opto | 26 | 31 | Enc 6 A |
-| 10 | 14 | I2S BCK → PCM5102A | 27 | 32 | Enc 6 B |
-| 11 | 15 | I2S LRCK → PCM5102A | 28 | 34 | spare (ADC2) |
-| 12 | 16 | I2S DIN → PCM5102A | | | |
-| 13 | 17 | Enc 4 A | | | |
+| 0 | 1 | Enc 1 A | 14 | 19 | Enc 6 A |
+| 1 | 2 | Enc 1 B | 15 | 20 | Enc 6 B |
+| 2 | 4 | Enc 2 A | 16 | 21 | UART0 TX → Nano A29 (UART2 RX) |
+| 3 | 5 | Enc 2 B | 17 | 22 | UART0 RX ← Nano A28 (UART2 TX) |
+| 4 | 6 | I2C0 SDA (OLED 0, 1) | 18 | 24 | Enc 1 SW |
+| 5 | 7 | I2C0 SCL (OLED 0, 1) | 19 | 25 | Enc 2 SW |
+| 6 | 9 | Enc 3 A | 20 | 26 | Enc 3 SW |
+| 7 | 10 | Enc 3 B | 21 | 27 | UART1 RX ← MIDI opto |
+| 8 | 11 | Enc 4 SW | 22 | 29 | Enc 5 SW |
+| 9 | 12 | spare | 26 | 31 | I2C1 SDA (OLED 2) |
+| 10 | 14 | Enc 4 A | 27 | 32 | I2C1 SCL (OLED 2) |
+| 11 | 15 | Enc 4 B | 28 | 34 | Enc 6 SW |
+| 12 | 16 | Enc 5 A | | | |
+| 13 | 17 | Enc 5 B | | | |
 
 - **Encoders:** A/B are adjacent GPIOs, as the PIO quadrature program
-  needs.
-- **Switches:** the six push switches are on an MCP23017 (0x20, on the
-  upstream I2C0 bus beside the mux).
-  - They use GPA0–5 with internal pull-ups and pull to GND.
-  - INTA on GP8 signals a change, so the Pico reads the expander only
-    then. Debouncing is in software.
-  - GPB0–7 and GPA6–7 are free for more buttons or LEDs.
-- **Pico console:** uses USB CDC, which frees GP0/GP1 from UART0.
+  needs. Switches use internal pull-ups and pull to GND. Debouncing is in
+  software.
+- **I2C pull-ups:** 4.7 kΩ to 3.3 V on each bus, unless the OLED modules
+  already have them; most do.
+- **Pico consoles:** both use USB CDC.
 - **Power:** during development each board runs from its own USB, with
-  GND tied between them. For the finished build, feed 5 V to Nano L13
-  (VSYS) and Pico pin 39 (VSYS) from one supply.
+  every GND tied together. For the finished build, one 5 V supply feeds
+  Nano L13 (VSYS) and Pico pin 39 (VSYS) on both Picos.
 
 **MIDI input circuit (TRS Type A):**
 
@@ -112,10 +133,10 @@ which 2 are spare:
 - Tip goes through 220 Ω to the opto LED anode, and ring goes to the
   cathode. Put a 1N4148 across the LED, in reverse.
 - The opto output is open-collector, with a 470 Ω–1 kΩ pull-up to 3.3 V,
-  into GP9.
+  into Pico B GP21.
 - A Type A/B swap jumper footprint is cheap insurance.
 
-### Rejected audio paths (why the Pico exists)
+### Rejected audio paths (why the Picos exist)
 
 - **No edge pin has an I2S function.** A28/A18/A19 were assumed from the
   pinlist and turned out to have none.
@@ -128,47 +149,67 @@ which 2 are spare:
   and fewer encoders.
 - **The internal codec** feeds a bridged speaker amp (L5/L6). It's mono,
   fair quality, and undocumented.
+- **A single Pico for audio and panel** ran out of pins. It needed a
+  TCA9548A mux plus an MCP23017, and it mixed UI work into the
+  audio-timing board.
 
-## Nano ⇄ Pico link
+## Links
+
+### Audio link: Nano ⇄ Pico A (`common/rvlink.h`)
 
 **Roles:**
 
-- The Pico is the clock master for audio. It keeps a ring of 4 output
-  blocks (64 stereo frames each) feeding PIO I2S at exactly 48 kHz.
-- It raises **DRQ** whenever a slot is free and its reply is preloaded in
-  the SPI TX FIFO/DMA.
-- The Nano answers each DRQ with one fixed-length, full-duplex transaction.
+- Pico A is the audio clock master. It keeps a ring of 4 blocks (64 stereo
+  frames each) feeding PIO I2S at exactly 48 kHz.
+- It raises **DRQ** whenever a slot is free and its status reply is
+  preloaded.
+- The Nano answers each DRQ with one fixed-length, full-duplex SPI
+  transaction.
 
 **Electrical:**
 
 - SPI mode 3 (CPOL=1, CPHA=1). The RP2350's PL022 in slave mode with
   CPHA=0 needs CS to toggle between frames, and mode 3 avoids that.
-- Start at 8 MHz. The RP2350 slave limit is clk_peri/12, about 12.8 MHz
-  at a 153.6 MHz sysclk.
-- The payload needs about 4.3 Mbit/s, so 8 MHz gives roughly 2× headroom.
+- Start at 8 MHz. The slave limit is clk_peri/12, about 12.8 MHz at a
+  153.6 MHz sysclk.
+- The payload needs about 3.2 Mbit/s.
 
-**Transaction (1024 bytes each way; little-endian; CRC32 last):**
+**Transaction (528 bytes each way; little-endian; CRC32 last):**
 
-| Nano → Pico | Pico → Nano |
+| Nano → Pico A | Pico A → Nano |
 |---|---|
-| magic `'RVL1'`, seq u16, flags u16 | magic `'RVP1'`, seq echo u16, ring fill u8, underruns u16 |
-| audio: 64 × (L,R) int32, 24-bit left-aligned (512 B) | event count u8 |
-| OLED: display id u8 + page index u8 + 128 B page data | events: up to 64 × {type u8, id u8, value i16} (encoder delta, switch, MIDI message, status) |
-| reserved / padding | padding |
+| magic `'RVL1'`, seq u16, flags u16 | magic `'RVA1'`, seq echo u16, ring fill u8, underruns u16 |
+| audio: 64 × (L,R) int32, 24-bit left-aligned (512 B) | padding |
 | CRC32 | CRC32 |
 
-- **The Pico parses MIDI** into whole messages, so the Nano never sees raw
-  bytes.
-- **Errors:** a CRC failure on either side drops that block (the Pico
-  plays silence for it) and bumps a counter. A sequence gap counts as an
-  underrun.
-- **Latency:** up to 4 × 64 frames ≈ 5.3 ms worst case. The Nano always
-  has the next block already rendered when DRQ arrives.
-- **Shared definitions:** both builds include the struct layouts and
-  constants from `common/rvlink.h`.
+- **Errors:** a CRC failure drops the block (Pico A plays silence for it)
+  and bumps a counter. A sequence gap counts as an underrun.
+- **Latency:** at most 4 × 64 frames ≈ 5.3 ms. The Nano always has the next
+  block rendered before DRQ arrives.
+- **Pico A clock:** sysclk is 153.6 MHz (48 kHz × 64 × 50), so the PIO
+  divider is an integer and adds no fractional-divider jitter.
 
-**Pico audio clock:** sysclk is set to 153.6 MHz (48 kHz × 64 × 50), so the
-PIO divider is an integer and adds no fractional-divider jitter.
+### Panel link: Nano ⇄ Pico B (`common/rvpanel.h`)
+
+- **Framing:** UART 1.5625 Mbaud 8N1 (25 MHz / 16, an exact divisor on the
+  Nano). Each packet is COBS-encoded with a 0x00 delimiter and ends with a
+  CRC16. Either side may send at any time; there are no acks.
+- **Nano → Pico B:**
+  - `PAGE {display u8, page u8, data[128]}`: the Nano sends only dirty
+    pages.
+  - `CONFIG {…}`: brightness, encoder acceleration, and similar settings.
+- **Pico B → Nano:**
+  - `ENC {id u8, delta i8}`
+  - `SW {id u8, state u8}`
+  - `MIDI {len u8, bytes[3]}`: whole messages, parsed on Pico B.
+  - `STATUS {crc_errors u16, …}`
+- **Budget:** about 150 KB/s. A full frame on all 3 displays is about
+  3.1 KB, so the link supports about 48 full refreshes per second, far
+  more than the I2C side.
+- **I2C refresh:** I2C0 carries two displays at 400 kHz (1 MHz if the
+  modules tolerate it). Pico B writes pages as they arrive.
+- **MIDI latency:** MIDI goes through Pico B and the UART. That adds about
+  0.1 ms, which is negligible.
 
 ## Boot chain
 
@@ -220,23 +261,21 @@ src/                 Nano image (bare metal, RV64)
   boot/              start.S, linker script, trap entry, SBI calls
   board/             per-board constants (nano, qemu)
   hal/               uart, plic, timer, gpio+pinmux, spi, dma, sdhci, cache
-  drivers/           link (rvlink master), sd → FatFs diskio
+  drivers/           audio_link (rvlink master), panel_link (rvpanel), sd → FatFs
   engine/            platform-independent DSP: oscillators, filters, mod, fx, voices
-  ui/                pages, parameter model, rendering into a 1 KB framebuffer
+  ui/                pages, parameter model, rendering 3 × 1 KB framebuffers
   app/               main loop, wiring, preset load/save
-                     (ui/ renders one framebuffer per display)
-firmware/rp2350/     Pico 2 W firmware (Pico SDK, C, CMake)
-  audio_i2s.pio      I2S output, 64 fs
-  quadrature.pio     encoder decode
-  link.c             rvlink slave (SPI0 + DMA, DRQ)
-  midi.c, oled.c     UART1 MIDI parser, SSD1306 page writer
-common/rvlink.h      link protocol, shared by both builds
+firmware/            Pico SDK tree, one CMake project, two targets
+  audio/             Pico A: audio_i2s.pio, rvlink slave (SPI0 + DMA, DRQ)
+  panel/             Pico B: quadrature.pio, switches, ssd1306, midi, rvpanel
+  common/            shared Pico code (COBS, CRC, USB CDC logging)
+common/              rvlink.h, rvpanel.h: protocols shared by all three builds
 third_party/         FatFs (ChaN), OpenSBI clone (gitignored)
-emu/                 host build: engine + ui on macOS (CoreAudio, terminal/SDL OLED)
+emu/                 host build: engine + ui on macOS (CoreAudio, terminal/SDL OLEDs)
 ```
 
 `engine/` and `ui/` have **no hardware includes**. They take parameter
-changes and MIDI events and return audio blocks and a framebuffer, so they
+changes and MIDI events and return audio blocks and framebuffers, so they
 also run on the host (`emu/`).
 
 ## Runtime model
@@ -245,9 +284,10 @@ also run on the host (`emu/`).
 
 | Context | Trigger | Work |
 |---|---|---|
-| GPIO IRQ (DRQ rising) | Pico needs a block | Start the SPI1 TX/RX DMA, sending the already-rendered block |
-| DMA-complete IRQ | transfer done | CRC-check the reply, push its events to queues, then render the next block (`engine_render(64)`, 1.33 ms budget) |
-| Main loop | best effort | UI events → param changes → UI redraw into the framebuffer; preset I/O on SD |
+| GPIO IRQ (DRQ rising) | Pico A needs a block | Start the SPI1 TX/RX DMA, sending the already-rendered block |
+| SPI DMA-complete IRQ | transfer done | Check the status reply, then render the next block (`engine_render(64)`, 1.33 ms budget) |
+| UART2 RX IRQ | panel bytes | COBS decode, then queue events (encoder, switch, MIDI) for the audio context |
+| Main loop | best effort | UI events → param changes → redraw the framebuffers → queue dirty pages to UART2 TX; preset I/O on SD |
 
 - **Cache coherency:** the C906 doesn't snoop DMA. Clean the TX buffer and
   invalidate the RX buffer with T-Head CMO (`th.dcache.cva` / `th.dcache.iva`),
@@ -255,16 +295,19 @@ also run on the host (`emu/`).
 - **Little core (C906L):** unused. The FSBL starts the vendor `cvirtos.bin`
   on it (see Unverified), and it will later be replaced by a parking loop.
 
-**Pico:**
+**Pico A:**
 
-- Core 0 handles the link: SPI0 DMA and DRQ, then the block ring.
+- Core 0 runs the link: SPI0 DMA and DRQ, into the ring.
 - PIO DMA feeds I2S from the ring.
-- Core 1 runs MIDI, the encoders (polled from the PIO FIFOs) and OLED
-  page writes.
-- An underrun repeats silence and is reported in the next reply.
+- An underrun plays silence and is reported.
 
-- **Audio format:** 48 kHz exactly, stereo, 24-bit in 32-bit slots.
-  Synthesis is `float` on the Nano. RVV 0.7.1 is a later optimisation.
+**Pico B:**
+
+- Core 0 runs the panel link (UART0 with DMA) and the I2C display writers.
+- Core 1 runs the encoder PIO FIFOs, switch debounce and the MIDI parser.
+
+**Audio format:** 48 kHz exactly, stereo, 24-bit in 32-bit slots.
+Synthesis is `float` on the Nano. RVV 0.7.1 is a later optimisation.
 
 ## Drone engine (initial sketch)
 
@@ -283,7 +326,7 @@ also run on the host (`emu/`).
   owns one 64-pixel-wide half:
 
   ```
-  OLED 0 (mux ch0)        OLED 1 (mux ch1)        OLED 2 (mux ch2)
+  OLED 0 (I2C0, 0x3C)     OLED 1 (I2C0, 0x3D)     OLED 2 (I2C1, 0x3C)
   ┌──────────┬──────────┐ ┌──────────┬──────────┐ ┌──────────┬──────────┐
   │ OSC  1/4 │          │ │ FILTER   │          │ │ SPACE    │          │  ← 8 px header: page name
   │ DETUNE   │ DRIFT    │ │ CUTOFF   │ RESO     │ │ DELAY    │ REVERB   │  ← param name (6x8 font)
@@ -313,13 +356,14 @@ also run on the host (`emu/`).
 |---|---|---|
 | M0 ✅ | Nano toolchain, linker, `start.S`, fip packaging, LED | LED1 toggles from an SD boot (2026-10-01) |
 | M1 | Nano UART0 via FTDI; traps, PLIC, SBI timer IRQ | Boot log captured; 1 kHz tick count printed each second |
-| M2 | Pico scaffold (Pico SDK, CMake) + PIO I2S at 153.6 MHz sysclk | Clean 440 Hz sine from the PCM5102A, no clicks over 10 min |
-| M3 | Pico encoders, MIDI (UART1), OLED | Events printed over USB CDC; text on the OLED |
-| M4 | Nano pinmux, GPIO IRQ, SPI1 master + DMA, cache handling | Loopback/scope check of SPI1 mode 3 at 8 MHz |
-| M5 | rvlink end to end | The Nano's sine plays via the Pico; Pico events arrive at the Nano; 0 CRC errors and 0 underruns over 10 min |
-| M6 | Drone engine + `emu/` host build | Engine plays on the host, then on hardware via encoders and MIDI |
-| M7 | SDHCI + FatFs presets | Save and load across power cycles |
-| M8 | Perf (RVV), enclosure, single 5 V supply | CPU headroom ≥ 50 % at 4 voices |
+| M2 | Pico SDK tree; Pico A PIO I2S at 153.6 MHz sysclk | Clean 440 Hz sine from the PCM5102A, no clicks over 10 min |
+| M3 | Pico B: encoders, switches, 3 OLEDs, MIDI | Events printed over USB CDC; a test pattern on all 3 OLEDs |
+| M4 | Nano pinmux, GPIO IRQ, SPI1 master + DMA, cache handling | Logic-analyser check of SPI1 mode 3 at 8 MHz |
+| M5 | rvlink end to end | The Nano's sine plays via Pico A; 0 CRC errors and 0 underruns over 10 min |
+| M6 | Nano UART2 + rvpanel end to end | Encoders and MIDI reach the Nano; the Nano draws on all 3 OLEDs |
+| M7 | Drone engine + `emu/` host build | Engine plays on the host, then on hardware via the panel and MIDI |
+| M8 | SDHCI + FatFs presets | Save and load across power cycles |
+| M9 | Perf (RVV), enclosure, single 5 V supply | CPU headroom ≥ 50 % at 4 voices |
 
 ## References
 
@@ -333,7 +377,7 @@ also run on the host (`emu/`).
   in the same SDK
 - LicheeRV Nano wiki: https://wiki.sipeed.com/hardware/en/lichee/RV_Nano/1_intro.html
 - Pico 2 W datasheet and pinout: https://datasheets.raspberrypi.com/picow/pico-2-w-datasheet.pdf
-- RP2350 datasheet (PIO, PL022 SPI slave):
+- RP2350 datasheet (PIO, PL022 SPI slave, UART):
   https://datasheets.raspberrypi.com/rp2350/rp2350-datasheet.pdf
 - The Milk-V Duo 256M uses the same SG2002, so its bare-metal material
   applies here.
