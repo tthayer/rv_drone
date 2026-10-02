@@ -14,11 +14,12 @@ BOARD_UP := $(shell echo $(BOARD) | tr a-z A-Z)
 
 CFLAGS  := -std=c11 -march=rv64gc -mabi=lp64d -mcmodel=medany -ffreestanding \
            -nostdlib -O2 -Wall -Wextra -Werror -ffunction-sections -fdata-sections \
-           -DBOARD_$(BOARD_UP) -Isrc/board -Isrc/hal -Isrc/boot
+           -DBOARD_$(BOARD_UP) -Isrc/board -Isrc/hal -Isrc/boot $(EXTRA_CFLAGS)
 ASFLAGS := -march=rv64gc -mabi=lp64d -mcmodel=medany -DBOARD_$(BOARD_UP) -Wall -Werror
 LDFLAGS := -nostdlib -static -Wl,-T,src/boot/link.ld -Wl,-Map,$(NAME).map -Wl,--gc-sections -Wl,--no-warn-rwx-segments
 
-SRCS := src/boot/start.S src/hal/uart.c src/app/main.c
+SRCS := src/boot/start.S src/boot/trap.S src/hal/uart.c src/hal/trap.c \
+       src/hal/timer.c src/hal/plic.c src/app/main.c
 OBJS := $(patsubst src/%,$(BUILD)/%.o,$(SRCS))
 
 all: $(NAME).elf $(NAME).bin $(NAME).lst

@@ -2,6 +2,9 @@
 #include <stddef.h>
 #include "board.h"
 #include "uart.h"
+#include "trap.h"
+#include "plic.h"
+#include "timer.h"
 
 /* Freestanding helpers; GCC may emit calls to these even with -ffreestanding. */
 void *memset(void *d, int c, size_t n)
@@ -19,20 +22,6 @@ void *memcpy(void *d, const void *s, size_t n)
     while (n--)
         *p++ = *q++;
     return d;
-}
-
-static inline uint64_t rdtime(void)
-{
-    uint64_t t;
-    __asm__ volatile("rdtime %0" : "=r"(t));
-    return t;
-}
-
-static void delay_ms(uint64_t ms)
-{
-    uint64_t end = rdtime() + ms * (BOARD_TIMEBASE_HZ / 1000);
-    while (rdtime() < end)
-        ;
 }
 
 #define REG32(a) (*(volatile uint32_t *)(uintptr_t)(a))
@@ -61,13 +50,38 @@ void main(uint64_t hartid, uint64_t fdt)
     uart_put_hex(fdt);
     uart_puts(")\n");
 
-    for (uint64_t n = 0;; n++) {
-        delay_ms(500);
-        led_toggle();
-        delay_ms(500);
-        led_toggle();
-        uart_puts("heartbeat ");
-        uart_put_dec(n);
-        uart_putc('\n');
+    trap_init();
+    plic_init();
+    uart_enable_rx_irq();
+    timer_init();
+    __asm__ volatile("csrs sie, %0" :: "r"((1u << 5) | (1u << 9)));  /* STIE|SEIE */
+    __asm__ volatile("csrsi sstatus, 2");                            /* SIE */
+
+#ifdef M1_FAULT_TEST
+    (void)*(volatile uint32_t *)0;   /* load access fault -> trap dump */
+#endif
+
+    uint64_t last_sec = 0;
+    for (;;) {
+        __asm__ volatile("wfi");
+        uint64_t t = timer_ticks;
+        if (t / BOARD_TICK_HZ != last_sec) {
+            last_sec = t / BOARD_TICK_HZ;
+            led_toggle();
+            uart_puts("tick ");
+            uart_put_dec(t);
+            uart_puts(" time ");
+            uart_put_dec(rdtime());
+            uart_putc('\n');
+        }
+        int c;
+        while ((c = uart_getc_nonblock()) >= 0) {
+            uart_puts("rx: '");
+            uart_putc(c >= 32 && c < 127 ? (char)c : '.');
+            uart_puts("' (0x");
+            uart_putc("0123456789abcdef"[c >> 4]);
+            uart_putc("0123456789abcdef"[c & 15]);
+            uart_puts(")\n");
+        }
     }
 }

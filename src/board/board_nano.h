@@ -5,6 +5,12 @@
 #define BOARD_UART_SHIFT    2              /* 4-byte register stride */
 /* UNVERIFIED: 25 MHz timebase (SG2002 oscillator); confirm on hardware. */
 #define BOARD_TIMEBASE_HZ   25000000UL
+/* UNVERIFIED: PLIC base from vendor DTS ("thead,c900-plic"); S-mode access is
+ * gated by a T-Head control bit that OpenSBI sets. S-ctx of hart 0 = 1. */
+#define BOARD_PLIC_BASE     0x70000000UL
+#define BOARD_PLIC_SCTX     1
+/* UNVERIFIED: UART0 PLIC source 44 (SG2002 DTS). */
+#define BOARD_UART_IRQ      44
 /* LED1 on pad SD0_PWR_EN (GPIOA14): FMUX 0x03001038, func 3 = XGPIOA_14. */
 #define BOARD_LED_FMUX      0x03001038UL
 #define BOARD_LED_FMUX_GPIO 3

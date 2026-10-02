@@ -7,4 +7,7 @@
 #else
 #error "Define BOARD_NANO or BOARD_QEMU (make BOARD=nano|qemu)"
 #endif
+#ifndef BOARD_TICK_HZ
+#define BOARD_TICK_HZ       1000UL
+#endif
 #endif
