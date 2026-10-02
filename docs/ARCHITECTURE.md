@@ -228,7 +228,19 @@ lever on iteration speed. Each hardware test otherwise means rebuilding
 - PLIC at 0x70000000 and CLINT at 0x74000000, recalled from the Linux DTS.
 - That the UART registers are DW 16550-compatible with a 4-byte stride.
 - That I2C is DesignWare and SD is SDHCI (inferred from the Linux drivers).
-- I2S2 on the Ethernet footprint pads (mux func 7): whether the pads are
+- **I2S2 tap point.** Per schematic sheet 4, the path is SoC
+  EPHY_TX/RX_P/N → C49–C52 (100 nF in series) → L5/L6 (common-mode
+  chokes) → U7/U8 (pulse transformers, one side to GND) → RJ1 (the RJ45
+  footprint, pins 1/2/3/6).
+  - The RJ1 pads are **not** usable for I2S. They are AC-coupled, and if
+    the magnetics are fitted they are DC-shorted to GND.
+  - Tap the **SoC side** of the series caps instead:
+    - C49 = EPHY_TX_N = ETH_TXM → BCLK
+    - C50 = EPHY_TX_P = ETH_TXP → LRCK
+    - C52 = EPHY_RX_P = ETH_RXP → DOUT
+  - Still to check: which of C49–C52, L5/L6, U7/U8 and RJ1 are fitted on
+    the Nano-B, and the cap package size.
+- I2S2 on the Ethernet pads (mux func 7): whether the pads are
   reachable and whether anything sits between them and the SoC. (Disproven
   earlier: I2S on A28/A18/A19. Those pads have no IIS function.)
 - **The little core is not idle.** fiptool requires `--rtos`, so the FSBL
