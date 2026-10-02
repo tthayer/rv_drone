@@ -35,8 +35,26 @@ static void delay_ms(uint64_t ms)
         ;
 }
 
+#define REG32(a) (*(volatile uint32_t *)(uintptr_t)(a))
+
+static void led_init(void)
+{
+#ifdef BOARD_LED_GPIO_BASE
+    REG32(BOARD_LED_FMUX) = BOARD_LED_FMUX_GPIO;
+    REG32(BOARD_LED_GPIO_BASE + 0x04) |= 1u << BOARD_LED_BIT;
+#endif
+}
+
+static void led_toggle(void)
+{
+#ifdef BOARD_LED_GPIO_BASE
+    REG32(BOARD_LED_GPIO_BASE + 0x00) ^= 1u << BOARD_LED_BIT;
+#endif
+}
+
 void main(uint64_t hartid, uint64_t fdt)
 {
+    led_init();
     uart_puts("rv_drone hello (hart ");
     uart_put_dec(hartid);
     uart_puts(", fdt ");
@@ -44,7 +62,10 @@ void main(uint64_t hartid, uint64_t fdt)
     uart_puts(")\n");
 
     for (uint64_t n = 0;; n++) {
-        delay_ms(1000);
+        delay_ms(500);
+        led_toggle();
+        delay_ms(500);
+        led_toggle();
         uart_puts("heartbeat ");
         uart_put_dec(n);
         uart_putc('\n');
