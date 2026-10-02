@@ -39,7 +39,7 @@ work can never disturb audio timing.
 | Panel link | — | Nano ⇄ Pico B | UART, 1.5625 Mbaud 8N1, COBS-framed packets |
 | Displays | 3 × SSD1306 128x64 (as in pseudopod) | Pico B | I2C0: 0x3C + 0x3D; I2C1: 0x3C |
 | Controls | 6 rotary encoders with push | Pico B | PIO quadrature + GPIO |
-| MIDI in | 3.5 mm TRS Type A → H11L1/6N138 opto | Pico B | UART1 RX, 31250 8N1 |
+| MIDI in | M5Stack Unit MIDI (opto-isolated 3.5 mm TRS + DIN-5 in) | Pico B | UART1 RX, 31250 8N1 |
 | Storage | 32 GB microSD, FAT32 | Nano | SD0 (on-board slot) |
 | Debug | FTDI adapter (5 V; divider on its TX) / USB CDC | Nano UART0 / Picos USB | 115200 |
 
@@ -150,14 +150,30 @@ Everything else on Pico A is spare (debug LEDs, scope triggers).
   every GND tied together. For the finished build, one 5 V supply feeds
   Nano L13 (VSYS) and Pico pin 39 (VSYS) on both Picos.
 
-**MIDI input circuit (TRS Type A):**
+**MIDI input: M5Stack Unit MIDI** (https://docs.m5stack.com/en/unit/Unit_MIDI).
+Its schematic is `SCH_UnitMIDI_B04`, dated 2024-07-08.
 
-- Tip is pin 4 (source) and ring is pin 5 (sink).
-- Tip goes through 220 Ω to the opto LED anode, and ring goes to the
-  cathode. Put a 1N4148 across the LED, in reverse.
-- The opto output is open-collector, with a 470 Ω–1 kΩ pull-up to 3.3 V,
-  into Pico B GP21.
-- A Type A/B swap jumper footprint is cheap insurance.
+- **Input stage:** 3.5 mm (J2) and DIN-5 inputs feed a TLP2361 opto. The
+  opto is powered from the unit's MCU_VDD, a 3.3 V LDO (SE8533) running
+  from the Grove 5 V. Its output (UART_MIDI_IN) is a 3.3 V logic signal,
+  safe for the Pico.
+- **Grove HY2.0-4P wiring:**
+
+  | Grove pin | Wire | Net | Connect to |
+  |---|---|---|---|
+  | 1 | black | GND | GND |
+  | 2 | red | 5 V | Pico B VBUS (pin 40) |
+  | 3 | yellow | UART_MIDI_OUT, host → onboard SAM2695 synth | leave unconnected |
+  | 4 | white | UART_MIDI_IN, from the opto | Pico B GP21 (UART1 RX) |
+
+- **Mode switch:** set it to **Bypass**. Per the docs, Bypass routes MIDI
+  IN to the Grove TX (white). In Separate mode that pin is described as
+  floating.
+- **Unverified:** whether the 3.5 mm input is wired as TRS Type A (the
+  MicroFreak's type). If no MIDI arrives, try a Type A↔B adapter or use
+  the DIN input.
+- **Bonus:** the unit's SAM2695 General MIDI synth, with its own headphone
+  out, could serve as a MIDI monitor while debugging.
 
 ### Rejected audio paths (why the Picos exist)
 
@@ -380,7 +396,7 @@ Synthesis is `float` on the Nano. RVV 0.7.1 is a later optimisation.
 | M0 ✅ | Nano toolchain, linker, `start.S`, fip packaging, LED | LED1 toggles from an SD boot (2026-10-01) |
 | M1 | Nano UART0 via FTDI; traps, PLIC, SBI timer IRQ | Boot log captured; 1 kHz tick count printed each second |
 | M2 | Pico SDK tree; Pico A PIO I2S at 153.6 MHz sysclk | Clean 440 Hz sine from the PCM5102A, no clicks over 10 min |
-| M3 | Pico B: encoders, switches, 3 OLEDs, MIDI | Events printed over USB CDC; a test pattern on all 3 OLEDs |
+| M3 | Pico B: encoders, switches, 3 OLEDs, MIDI (Unit MIDI) | Events printed over USB CDC; a test pattern on all 3 OLEDs |
 | M4 | Nano pinmux, GPIO IRQ, SPI2 master + DMA, cache handling | Logic-analyser check of SPI2 mode 3 at 8 MHz |
 | M5 | rvlink end to end | The Nano's sine plays via Pico A; 0 CRC errors and 0 underruns over 10 min |
 | M6 | Nano UART2 + rvpanel end to end | Encoders and MIDI reach the Nano; the Nano draws on all 3 OLEDs |
