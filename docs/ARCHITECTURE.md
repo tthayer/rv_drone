@@ -24,7 +24,9 @@ and the SDK pinlist `cv181x_pinlist_swconfig.h`.
 | Status LED | onboard LED1 | GPIO | — | A14 (R13) |
 
 Header naming: L1–L14 is the left column and R1–R14 the right, top to
-bottom, as on schematic sheet 1/4. Every header GPIO is 3.3 V per the
+bottom, as on schematic sheet 1/4, with the USB-C port at the bottom (the
+L14/R14 end; L13/L14 are 5 V). On a breadboard the board sits with L in
+column c and R in column i, so only a/b (left) and j (right) are free. Every header GPIO is 3.3 V per the
 sheet 1/4 legend (Vio = 3.3 V for GPIOA/B/P).
 
 **Encoder allocation** (A/B are the quadrature inputs, SW is the push switch;
