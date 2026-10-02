@@ -17,7 +17,7 @@ The two boards are linked by SPI. The Nano header has no I2S pins
       LicheeRV Nano (DSP engine)                   Pico 2 W (I/O + audio clock)
  ┌───────────────────────────────┐   SPI1     ┌───────────────────────────────┐
  │ engine, fx, 256 MB DDR        │  mode 3    │ PIO I2S   ───▶ PCM5102A       │
- │ SPI master + DMA              │◀──────────▶│ PIO quad  ◀─── 5 encoders     │
+ │ SPI master + DMA              │◀──────────▶│ PIO quad  ◀─── 6 encoders     │
  │                               │◀── DRQ ────│ UART1 RX  ◀─── MIDI opto      │
  │ UART0 debug ─▶ FTDI           │            │ I2C0      ───▶ SSD1306        │
  └───────────────────────────────┘            └───────────────────────────────┘
@@ -29,21 +29,21 @@ The two boards are linked by SPI. The Nano header has no I2S pins
 | DSP | LicheeRV Nano B | Nano | C906 @ 1 GHz, RV64GC + RVV 0.7.1, 256 MB DDR |
 | Link | — | Nano ⇄ Pico | SPI, Nano master, mode 3, 8 MHz to start; DRQ from Pico |
 | Audio out | PCM5102A | Pico | I2S (PIO), Pico master, 64 fs, no MCLK (SCK tied low) |
-| Displays | SSD1306 128x64 (as in pseudopod), up to 8 | Pico | I2C0 → TCA9548A mux (0x70) → one OLED per channel (0x3C each) |
+| Displays | 3 × SSD1306 128x64 (as in pseudopod) | Pico | I2C0 → TCA9548A mux (0x70), channels 0–2, 0x3C each |
 | MIDI in | 3.5 mm TRS Type A → H11L1/6N138 opto | Pico | UART1 RX, 31250 8N1 |
-| Controls | 5 rotary encoders with push | Pico | PIO quadrature + GPIO |
+| Controls | 6 rotary encoders with push | Pico | A/B: PIO quadrature; switches: MCP23017 |
 | Storage | 32 GB microSD, FAT32 | Nano | SD0 (on-board slot) |
 | Debug | FTDI adapter (5 V; divider on its TX) / USB CDC | Nano UART0 / Pico USB | 115200 |
 
-The OLEDs are on the Pico, behind a TCA9548A I2C mux. That allows up to 8
-displays on GP4/GP5 with no extra pins, since each SSD1306 only offers
-0x3C or 0x3D. The Nano renders a 1 KB framebuffer per display and streams
+The OLEDs are on the Pico, behind a TCA9548A I2C mux, because each
+SSD1306 only offers 0x3C or 0x3D. The mux takes no extra pins and has room
+for up to 8 displays. The Nano renders a 1 KB framebuffer per display and streams
 dirty pages across the link, one 128-byte page per block.
 
-Budget: 750 pages/s ≈ 94 full frames/s across all displays, e.g. 4
-displays at about 23 fps. On the I2C side, 400 kHz gives about 25 ms per
-full frame. SSD1306s usually tolerate 1 MHz, so we try that. Moving the OLED back
-to the Nano's I2C3 (P22/P23) is a local change if it's ever wanted.
+Budget: 750 pages/s ≈ 94 full frames/s across all displays, so about
+30 fps each with 3. Most frames change only a few pages, so the real rate
+is higher. On the I2C side, 400 kHz gives about 25 ms per
+full frame. SSD1306s usually tolerate 1 MHz, so we try that. 
 
 ### Nano pins
 
@@ -73,30 +73,35 @@ leaving a/b (left) and j (right) free. Every header GPIO is 3.3 V.
 ### Pico 2 W pins
 
 GP23/24/25/29 belong to the CYW43 wireless chip, and the onboard LED is on
-the CYW43, so none of those are available. That leaves 26 GPIOs, and all
-of them are used:
+the CYW43, so none of those are available. That leaves 26 GPIOs, of
+which 2 are spare:
 
 | GP | Pico pin | Use | GP | Pico pin | Use |
 |---|---|---|---|---|---|
-| 0 | 1 | Enc 4 SW | 14 | 19 | Enc 3 B |
-| 1 | 2 | Enc 5 SW | 15 | 20 | Enc 2 SW |
-| 2 | 4 | Enc 1 A | 16 | 21 | SPI0 RX ← Nano MOSI |
-| 3 | 5 | Enc 1 B | 17 | 22 | SPI0 CSn ← Nano CS |
-| 4 | 6 | I2C0 SDA (TCA9548A) | 18 | 24 | SPI0 SCK ← Nano SCK |
-| 5 | 7 | I2C0 SCL (TCA9548A) | 19 | 25 | SPI0 TX → Nano MISO |
-| 6 | 9 | Enc 2 A | 20 | 26 | DRQ → Nano A27 |
-| 7 | 10 | Enc 2 B | 21 | 27 | Enc 4 A |
-| 8 | 11 | Enc 1 SW | 22 | 29 | Enc 4 B |
-| 9 | 12 | UART1 RX ← MIDI opto | 26 | 31 | Enc 5 A |
-| 10 | 14 | I2S BCK → PCM5102A | 27 | 32 | Enc 5 B |
-| 11 | 15 | I2S LRCK → PCM5102A | 28 | 34 | Enc 3 SW |
+| 0 | 1 | Enc 1 A | 14 | 19 | Enc 4 B |
+| 1 | 2 | Enc 1 B | 15 | 20 | spare |
+| 2 | 4 | Enc 2 A | 16 | 21 | SPI0 RX ← Nano MOSI |
+| 3 | 5 | Enc 2 B | 17 | 22 | SPI0 CSn ← Nano CS |
+| 4 | 6 | I2C0 SDA (mux + MCP23017) | 18 | 24 | SPI0 SCK ← Nano SCK |
+| 5 | 7 | I2C0 SCL (mux + MCP23017) | 19 | 25 | SPI0 TX → Nano MISO |
+| 6 | 9 | Enc 3 A | 20 | 26 | DRQ → Nano A27 |
+| 7 | 10 | Enc 3 B | 21 | 27 | Enc 5 A |
+| 8 | 11 | MCP23017 INTA (switch change) | 22 | 29 | Enc 5 B |
+| 9 | 12 | UART1 RX ← MIDI opto | 26 | 31 | Enc 6 A |
+| 10 | 14 | I2S BCK → PCM5102A | 27 | 32 | Enc 6 B |
+| 11 | 15 | I2S LRCK → PCM5102A | 28 | 34 | spare (ADC2) |
 | 12 | 16 | I2S DIN → PCM5102A | | | |
-| 13 | 17 | Enc 3 A | | | |
+| 13 | 17 | Enc 4 A | | | |
 
 - **Encoders:** A/B are adjacent GPIOs, as the PIO quadrature program
-  needs. Switches use internal pull-ups and pull to GND.
+  needs.
+- **Switches:** the six push switches are on an MCP23017 (0x20, on the
+  upstream I2C0 bus beside the mux).
+  - They use GPA0–5 with internal pull-ups and pull to GND.
+  - INTA on GP8 signals a change, so the Pico reads the expander only
+    then. Debouncing is in software.
+  - GPB0–7 and GPA6–7 are free for more buttons or LEDs.
 - **Pico console:** uses USB CDC, which frees GP0/GP1 from UART0.
-- **More encoders:** a 6th would need an MCP23017 on I2C0.
 - **Power:** during development each board runs from its own USB, with
   GND tied between them. For the finished build, feed 5 V to Nano L13
   (VSYS) and Pico pin 39 (VSYS) from one supply.
@@ -274,9 +279,31 @@ also run on the host (`emu/`).
     optional (latch mode).
   - CCs are mapped to the same parameter IDs the encoders drive.
   - Clock sync of the LFOs comes later.
-- **UI:** encoders are mapped onto pages of 4–6 parameters, and a push
-  cycles the page. The OLED shows the page name, the values and a small
-  scope.
+- **UI:** three displays, each split down the middle, so each encoder
+  owns one 64-pixel-wide half:
+
+  ```
+  OLED 0 (mux ch0)        OLED 1 (mux ch1)        OLED 2 (mux ch2)
+  ┌──────────┬──────────┐ ┌──────────┬──────────┐ ┌──────────┬──────────┐
+  │ OSC  1/4 │          │ │ FILTER   │          │ │ SPACE    │          │  ← 8 px header: page name
+  │ DETUNE   │ DRIFT    │ │ CUTOFF   │ RESO     │ │ DELAY    │ REVERB   │  ← param name (6x8 font)
+  │   12.5c  │   0.30   │ │  1.2 kHz │   0.65   │ │  850 ms  │   72 %   │  ← value (large font)
+  │ ◜────◝   │ ◜──◝     │ │ ◜─────◝  │ ◜───◝    │ │ ◜──◝     │ ◜─────◝  │  ← arc/bar of position
+  └──────────┴──────────┘ └──────────┴──────────┘ └──────────┴──────────┘
+     Enc 1      Enc 2        Enc 3      Enc 4        Enc 5      Enc 6
+  ```
+
+  - **Pages:** each page maps up to 6 parameters onto the six encoders.
+  - **Encoder switches:**
+    - Enc 1 push cycles the page.
+    - Other pushes are per page: fine adjust, reset to default, or
+      latch/hold.
+  - **Feedback:**
+    - A half briefly inverts or brightens when its encoder moves.
+    - The header row carries global state: MIDI activity, CPU load, page
+      x/N.
+    - A scope or spectrum view can take over one display temporarily, e.g.
+      while a switch is held.
 - **Presets:** stored as flat binary/INI files in `/presets` on the same FAT
   partition as `fip.bin`.
 
