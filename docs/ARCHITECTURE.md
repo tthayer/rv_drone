@@ -212,12 +212,20 @@ lever on iteration speed. Each hardware test otherwise means rebuilding
 - The Milk-V Duo 256M uses the same SG2002, so its bare-metal material
   applies here.
 
+### Verified on hardware (2026-10-01)
+
+- Booting from SD works with fiptool's LZMA-wrapped `loader_2nd`. The
+  vendor FSBL hands over to OpenSBI v1.8.1 (with its embedded DTB), and
+  OpenSBI starts our S-mode payload at 0x80200000.
+- LED1 toggles on A14 (FMUX 0x03001038 = 3, GPIO0 bit 14).
+- The card that worked was a 32 GB SDHC with MBR and a single FAT32
+  partition at a 4 MiB offset, holding `fip.bin` in its root.
+
 ### Unverified (from research; confirm on hardware)
 
 - PLIC at 0x70000000 and CLINT at 0x74000000, recalled from the Linux DTS.
 - That the UART registers are DW 16550-compatible with a 4-byte stride.
 - That I2C is DesignWare and SD is SDHCI (inferred from the Linux drivers).
-- The `loader_2nd` header format and whether LZMA is required.
 - I2S2 on the Ethernet footprint pads (mux func 7): whether the pads are
   reachable and whether anything sits between them and the SoC. (Disproven
   earlier: I2S on A28/A18/A19. Those pads have no IIS function.)
