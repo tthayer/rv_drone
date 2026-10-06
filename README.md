@@ -11,7 +11,7 @@ A bare-metal drone synthesizer on three boards:
 The design, pin maps, link protocols and milestones are in
 `docs/ARCHITECTURE.md`.
 
-**Current state:** M1 is done. The Nano boots from SD and runs a 1 kHz timer
+**Current state:** M2 is done: Pico A plays a 440 Hz tone over I2S. M1 is done too. The Nano boots from SD and runs a 1 kHz timer
 interrupt and an interrupt-driven UART0, and `make usbboot` boots it over USB. The Pico firmware is in `firmware/`; M2 (Pico A audio) is written but not yet verified on hardware.
 
 ## Toolchain

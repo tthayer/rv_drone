@@ -395,7 +395,7 @@ Synthesis is `float` on the Nano. RVV 0.7.1 is a later optimisation.
 |---|---|---|
 | M0 ✅ | Nano toolchain, linker, `start.S`, fip packaging, LED | LED1 toggles from an SD boot (2026-10-01) |
 | M1 ✅ | Nano UART0 via FTDI; traps, PLIC, SBI timer IRQ | Boot log captured; 1 kHz tick, `time` +25,000,000/s; UART RX IRQ echo (2026-10-05) |
-| M2 | Pico SDK tree; Pico A PIO I2S at 153.6 MHz sysclk | Clean 440 Hz sine from the PCM5102A, no clicks over 10 min |
+| M2 ✅ | Pico SDK tree; Pico A PIO I2S at 153.6 MHz sysclk | Clean 440 Hz sine from the PCM5102A; 10 min soak, 0 late refills, 750±1 blocks/s (2026-10-06) |
 | M3 | Pico B: encoders, switches, 3 OLEDs, MIDI (Unit MIDI) | Events printed over USB CDC; a test pattern on all 3 OLEDs |
 | M4 | Nano pinmux, GPIO IRQ, SPI2 master + DMA, cache handling | Logic-analyser check of SPI2 mode 3 at 8 MHz |
 | M5 | rvlink end to end | The Nano's sine plays via Pico A; 0 CRC errors and 0 underruns over 10 min |
@@ -404,10 +404,11 @@ Synthesis is `float` on the Nano. RVV 0.7.1 is a later optimisation.
 | M8 | SDHCI + FatFs presets | Save and load across power cycles |
 | M9 | Perf (RVV), enclosure, single 5 V supply | CPU headroom ≥ 50 % at 4 voices |
 
-### Status (2026-10-05)
+### Status (2026-10-06)
 
 **Done:**
-- **M0 and M1:** done on hardware.
+- **M0, M1 and M2:** done on hardware. Pico A plays a clean 440 Hz tone
+  through the PCM5102A. Flash it with `make pico-flash-audio`.
 - **USB boot dev loop:** `make usbboot RESET_PORT=…` takes about 20 s from
   Ctrl-R to the running image, with no SD card. The C906L is parked by
   `build/park.bin`.
@@ -415,8 +416,7 @@ Synthesis is `float` on the Nano. RVV 0.7.1 is a later optimisation.
   per-second PLIC counters). Trim them once M4 is stable.
 
 **Next:**
-- **M2:** start the Pico SDK tree under `firmware/`. It needs the Pico SDK,
-  arm-none-eabi-gcc, cmake and picotool.
+- **M3:** Pico B panel (encoders, switches, 3 OLEDs, MIDI).
 - **M4:** Nano SPI2 on P18/P21/P22/P23. Measure P22 for 3.3 V first.
 
 **Optional:**
@@ -425,7 +425,6 @@ Synthesis is `float` on the Nano. RVV 0.7.1 is a later optimisation.
   276 KB window.
 
 **Hardware to build or buy:**
-- PCM5102A board;
 - 6 encoders;
 - move OLED 1 to 0x3D;
 - Unit MIDI in Bypass mode, wired to Pico B GP21.
