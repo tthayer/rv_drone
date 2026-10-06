@@ -19,7 +19,7 @@ ASFLAGS := -march=rv64gc -mabi=lp64d -mcmodel=medany -DBOARD_$(BOARD_UP) -Wall -
 LDFLAGS := -nostdlib -static -Wl,-T,src/boot/link.ld -Wl,-Map,$(NAME).map -Wl,--gc-sections -Wl,--no-warn-rwx-segments
 
 SRCS := src/boot/start.S src/boot/trap.S src/hal/uart.c src/hal/trap.c \
-       src/hal/timer.c src/hal/plic.c src/app/main.c
+       src/hal/timer.c src/hal/plic.c src/hal/reset.c src/app/main.c
 OBJS := $(patsubst src/%,$(BUILD)/%.o,$(SRCS))
 
 all: $(NAME).elf $(NAME).bin $(NAME).lst
@@ -45,14 +45,31 @@ run-qemu:
 opensbi:
 	tools/build-opensbi.sh
 
+# C906L parking image (replaces the vendor cvirtos.bin in fip.bin).
+build/park.bin: src/park/park.S
+	@mkdir -p build
+	$(CC) -march=rv64gc -mabi=lp64d -nostdlib -Wl,-Ttext=0x83F40000 -Wl,--no-warn-rwx-segments $< -o build/park.elf
+	$(OBJCOPY) -O binary build/park.elf $@
+
+export RTOS_BIN ?= build/park.bin
+
 # OPENSBI_BIN defaults to our own build; override from the environment to use another.
 export OPENSBI_BIN ?= build/opensbi/fw_dynamic.bin
 
-fip: $(if $(filter command line environment,$(origin OPENSBI_BIN)),,opensbi)
+fip: $(if $(filter command line environment,$(origin OPENSBI_BIN)),,opensbi) build/park.bin
 	$(MAKE) BOARD=nano
 	tools/mkfip.sh
+
+# Boot fip.bin over USB (Nano without a bootable SD). RESET_PORT, if set, is the
+# UART0 serial device: Ctrl-R is sent there first so a running image resets
+# into the ROM's USB download mode. USB_DL_MAGIC: vendor cv_dl_magic.bin.
+PYTHON ?= $(if $(wildcard .venv/bin/python),.venv/bin/python,python3)
+usbboot: fip
+	@[ -n "$(USB_DL_MAGIC)" ] || { echo "set USB_DL_MAGIC (vendor cv_dl_magic.bin)"; exit 1; }
+	$(if $(RESET_PORT),stty -f $(RESET_PORT) 115200 raw -echo clocal && printf '\022' > $(RESET_PORT))
+	$(PYTHON) tools/usbboot.py build/nano/fip.bin --magic $(USB_DL_MAGIC)
 
 clean:
 	rm -rf build
 
-.PHONY: all run-qemu opensbi fip clean
+.PHONY: all run-qemu opensbi fip usbboot clean

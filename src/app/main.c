@@ -5,6 +5,7 @@
 #include "trap.h"
 #include "plic.h"
 #include "timer.h"
+#include "reset.h"
 
 /* Freestanding helpers; GCC may emit calls to these even with -ffreestanding. */
 void *memset(void *d, int c, size_t n)
@@ -91,6 +92,10 @@ void main(uint64_t hartid, uint64_t fdt)
         }
         int c;
         while ((c = uart_getc_nonblock()) >= 0) {
+            if (c == 0x12) {                       /* Ctrl-R: reset (usbboot) */
+                uart_puts("reset\n");
+                board_reset();
+            }
             uart_puts("rx: '");
             uart_putc(c >= 32 && c < 127 ? (char)c : '.');
             uart_puts("' (0x");

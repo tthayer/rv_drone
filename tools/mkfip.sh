@@ -2,7 +2,7 @@
 # Pack build/nano/rv_drone.bin into fip.bin using sophgo/fiptool.
 # Required env: FIPTOOL (clone dir), FSBL_BIN, DDR_PARAM_BIN.
 # OPENSBI_BIN: set by `make fip` to build/opensbi/fw_dynamic.bin (tools/build-opensbi.sh) unless overridden.
-# Optional: RTOS_BIN (default $FIPTOOL/data/cvirtos.bin; fiptool needs one).
+# RTOS_BIN: set by `make fip` to build/park.bin (C906L parking loop); fiptool needs one.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -26,7 +26,6 @@ python3 "$FIPTOOL/fiptool" --fsbl "$FSBL_BIN" --ddr_param "$DDR_PARAM_BIN" \
 cat <<MSG
 
 Wrote $OUT
-Copy to the FAT (boot) partition of the SD card, as fip.bin:
-  cp $OUT /Volumes/<BOOT>/fip.bin && diskutil eject /Volumes/<BOOT>
-Then insert the card and watch UART0 (115200 8N1; A16 TX / A17 RX).
+SD boot: copy to the FAT partition of the SD card as fip.bin.
+USB boot: \`make usbboot\` (no bootable SD in the Nano).
 MSG

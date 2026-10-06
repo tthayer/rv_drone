@@ -4,3 +4,4 @@ build/
 fip.bin
 .DS_Store
 third_party/
+.venv/
