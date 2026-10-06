@@ -448,13 +448,13 @@ Behaviour:
   per-second PLIC counters). Trim them once M4 is stable.
 
 **Next:**
-- **M5:** real audio over rvlink. Before or alongside it:
-  - **Non-blocking Nano console.** The ~17 ms/s blocking 115200 stats
-    print causes ~11 missed DRQ/s (seq gaps).
-  - **Explain the ~22 short frames/s** Pico A still counts. It may be a
-    re-arm race after a late DRQ.
-  - **Nano SPI DMA.** The polled frame masks IRQs for 0.55 ms of every
-    1.33 ms.
+- **M5:** real audio over rvlink.
+  - Done 2026-10-06: non-blocking Nano console; DRQ hold-off for 20 µs
+    after each frame; Pico A short detection moved from the CS edge IRQ
+    (it fired mid-frame) to a stall check at the block tick.
+  - 10 min soak: 450k frames at 750/s, 0 CRC, magic, pattern, short or
+    gap errors on either side.
+  - Remaining: Nano SPI DMA (in progress), so frames stop masking IRQs.
 
 **Optional:**
 - **Faster USB boot:** slim OpenSBI (generic platform with only the 8250,
