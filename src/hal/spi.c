@@ -1,8 +1,9 @@
 /* DW APB SSI master on SPI2 (0x041A0000, "snps,dw-apb-ssi", not DWC_ssi):
  * CTRLR0 DFS[3:0] FRF[5:4] SCPH[6] SCPOL[7] TMOD[9:8] (SDK spi-dw-core.c:270-322).
- * CS: controller CS (SER=1). DW SSI drops CS when the TX FIFO runs empty, so
- * spi_xfer() prefills the FIFO before raising SER, keeps it topped up, and masks
- * S-mode interrupts for the ~0.55 ms frame so a tick/IRQ cannot starve it.
+ * CS: P18 is driven as a GPIO and held low for the whole frame. The controller's
+ * own CS blips whenever the TX FIFO momentarily empties, which the Pico slave
+ * read as short frames. SER=1 is still needed to clock. spi_xfer() keeps the
+ * FIFO topped up and masks S-mode interrupts for the ~0.55 ms frame.
  * TODO(DMA): later via the DW AXI DMAC at 0x04330000 (+ T-Head cache ops); then
  * the frame is a single descriptor and the IRQ masking goes away. */
 #include "spi.h"
@@ -71,7 +72,9 @@ uint32_t spi_clk_in_hz(void)
 
 int spi_init(uint32_t target_hz)
 {
-    pinmux_set(BOARD_FMUX_SPI_CS, 1);
+    pinmux_set(BOARD_FMUX_SPI_CS, BOARD_SPI_CS_FN);
+    R32(BOARD_SPI_CS_GPIO, 0x00) |= 1u << BOARD_SPI_CS_BIT;   /* DR: CS high */
+    R32(BOARD_SPI_CS_GPIO, 0x04) |= 1u << BOARD_SPI_CS_BIT;   /* DDR: output */
     pinmux_set(BOARD_FMUX_SPI_MISO, 1);
     pinmux_set(BOARD_FMUX_SPI_MOSI, 1);
     pinmux_set(BOARD_FMUX_SPI_SCK, 1);
@@ -134,12 +137,14 @@ int spi_xfer(const uint8_t *tx, uint8_t *rx, size_t n)
     size_t sent = 0, got = 0;
     int rc = 0;
 
-    SSI(SER) = 0;
+    /* CS low before anything can clock: the DW SSI may start shifting as soon
+     * as the FIFO has data, whatever SER says. */
+    R32(BOARD_SPI_CS_GPIO, 0x00) &= ~(1u << BOARD_SPI_CS_BIT);
+    SSI(SER) = 1;
     SSI(SSIENR) = 1;
     (void)SSI(ICR);
-    while (sent < n && sent - got < cap)     /* prefill: CS only drops once SER is set */
+    while (sent < n && sent - got < cap)     /* prefill */
         SSI(DR) = tx[sent++];
-    SSI(SER) = 1;                            /* CS low, clocks start with a full FIFO */
 
     uint64_t dead = rdtime() + BOARD_TIMEBASE_HZ / 100;      /* 10 ms */
     while (got < n) {
@@ -156,6 +161,7 @@ int spi_xfer(const uint8_t *tx, uint8_t *rx, size_t n)
         ;
     if (rc == 0)
         rc = (int)(SSI(RISR) & RISR_ERR);
+    R32(BOARD_SPI_CS_GPIO, 0x00) |= 1u << BOARD_SPI_CS_BIT;     /* CS high */
     SSI(SER) = 0;
     SSI(SSIENR) = 0;
     (void)SSI(ICR);

@@ -112,6 +112,7 @@ static void cs_gpio_cb(uint gpio, uint32_t events) {
     (void)events;
     if (gpio != PIN_CS || !link_armed) return;
     busy_wait_us_32(2);                 // let the last byte reach memory via DMA
+    if (!gpio_get(PIN_CS)) return;              // CS low again: a blip, not frame end
     if (!dma_channel_is_busy(rx_ch)) return;    // completed; DMA IRQ handles it
     uint32_t rem = rx_remaining();
     if (rem == RVLINK_FRAME_LEN) return;        // CS glitch, nothing received

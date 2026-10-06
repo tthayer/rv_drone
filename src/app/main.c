@@ -116,7 +116,7 @@ void main(uint64_t hartid, uint64_t fdt)
             uart_puts("link: frames "); uart_put_dec(fr - last_frames);
             uart_puts("/s  rx_crc "); uart_put_dec(l->rx_crc_err);
             uart_puts("  rx_magic "); uart_put_dec(l->rx_magic_err);
-            uart_puts("  missed "); uart_put_dec(l->missed);
+            uart_puts("  missed "); uart_put_dec(l->missed); uart_puts("  spur "); uart_put_dec(l->spurious);
             uart_puts("  slave(seq "); uart_put_dec(l->slave_seq_echo);
             uart_puts(", crc_err "); uart_put_dec(l->slave_crc_err);
             uart_puts(", underruns "); uart_put_dec(l->slave_underruns);

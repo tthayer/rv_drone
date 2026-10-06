@@ -9,6 +9,7 @@ typedef struct {
     uint32_t frames;          /* completed transactions */
     uint32_t drq_edges;       /* DRQ IRQs seen */
     uint32_t missed;          /* DRQ while a previous one was still unserviced */
+    uint32_t spurious;        /* DRQ edge but line low at service time (crosstalk) */
     uint32_t rx_crc_err, rx_magic_err, spi_err;
     uint32_t xfer_ticks;      /* last transaction, rdtime ticks (setup + 528 B) */
     uint32_t xfer_ticks_min;

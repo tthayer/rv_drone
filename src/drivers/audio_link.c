@@ -14,6 +14,7 @@ const volatile audio_link_stats_t *audio_link_stats(void) { return &st; }
 #include "pinmux.h"
 #include "spi.h"
 #include "timer.h"
+#include "uart.h"
 
 static rvlink_m2s_t tx_frame __attribute__((aligned(64)));
 static rvlink_s2m_t rx_frame __attribute__((aligned(64)));
@@ -65,10 +66,17 @@ void audio_link_poll(void)
     if (!pending)
         return;
     pending = 0;
+    /* DRQ is a level request: SCK crosstalk on the breadboard makes false edges,
+     * so start only while DRQ is really high. */
+    if (!gpio_read(BOARD_DRQ_GPIO_BIT)) {
+        st.spurious++;
+        return;
+    }
 
     uint64_t t0 = rdtime();
     int rc = spi_xfer((const uint8_t *)&tx_frame, (uint8_t *)&rx_frame, RVLINK_FRAME_LEN);
     uint32_t dt = (uint32_t)(rdtime() - t0);
+    pending = 0;            /* edges latched during the frame are crosstalk */
     st.xfer_ticks = dt;
     if (dt < st.xfer_ticks_min)
         st.xfer_ticks_min = dt;
@@ -79,6 +87,18 @@ void audio_link_poll(void)
         st.spi_err++;
     } else if (rx_frame.magic != RVLINK_MAGIC_S2M) {
         st.rx_magic_err++;
+        static uint64_t next_dump;
+        if (rdtime() >= next_dump) {    /* bring-up: what does MISO carry? */
+            next_dump = rdtime() + BOARD_TIMEBASE_HZ;
+            const uint8_t *b = (const uint8_t *)&rx_frame;
+            uart_puts("link: bad rx:");
+            for (int i = 0; i < 24; i++) {
+                uart_putc(' ');
+                uart_putc("0123456789abcdef"[b[i] >> 4]);
+                uart_putc("0123456789abcdef"[b[i] & 15]);
+            }
+            uart_putc('\n');
+        }
     } else if (!rvlink_check(&rx_frame)) {
         st.rx_crc_err++;
     } else {

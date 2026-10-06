@@ -14,7 +14,7 @@ BOARD_UP := $(shell echo $(BOARD) | tr a-z A-Z)
 
 CFLAGS  := -std=c11 -march=rv64gc -mabi=lp64d -mcmodel=medany -ffreestanding \
            -nostdlib -O2 -Wall -Wextra -Werror -ffunction-sections -fdata-sections \
-           -DBOARD_$(BOARD_UP) -Isrc/board -Isrc/hal -Isrc/boot -Isrc/drivers -Icommon $(EXTRA_CFLAGS)
+           -MMD -MP -DBOARD_$(BOARD_UP) -Isrc/board -Isrc/hal -Isrc/boot -Isrc/drivers -Icommon $(EXTRA_CFLAGS)
 ASFLAGS := -march=rv64gc -mabi=lp64d -mcmodel=medany -DBOARD_$(BOARD_UP) -Wall -Werror
 LDFLAGS := -nostdlib -static -Wl,-T,src/boot/link.ld -Wl,-Map,$(NAME).map -Wl,--gc-sections -Wl,--no-warn-rwx-segments
 
@@ -25,6 +25,8 @@ SRCS += src/hal/pinmux.c src/hal/gpio.c src/hal/spi.c
 endif
 SRCS += src/drivers/audio_link.c
 OBJS := $(patsubst src/%,$(BUILD)/%.o,$(SRCS))
+
+-include $(OBJS:.o=.d)
 
 all: $(NAME).elf $(NAME).bin $(NAME).lst
 
