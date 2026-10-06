@@ -3,10 +3,12 @@
 #include "uart.h"
 #include "timer.h"
 #include "plic.h"
+#include "cache.h"
 
 #define CAUSE_INT   (1ull << 63)
 #define IRQ_S_TIMER 5
 #define IRQ_S_EXT   9
+#define EXC_ILLEGAL 2
 
 void trap_init(void)
 {
@@ -35,5 +37,7 @@ void trap_handler(struct trap_frame *f)
         case IRQ_S_EXT:   plic_dispatch(); return;
         }
     }
+    else if (f->scause == EXC_ILLEGAL && cache_probe_trap(f))
+        return;                          /* T-Head CMO not enabled: probe in cache_init() */
     fatal(f);
 }

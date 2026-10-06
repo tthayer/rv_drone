@@ -40,4 +40,16 @@
 #define BOARD_FMUX_SPI_MISO 0xDC
 #define BOARD_FMUX_SPI_MOSI 0xE0
 #define BOARD_FMUX_SPI_SCK  0xE4
+/* M5: sysDMA (DW_axi_dmac, 8 ch) for SPI2. SDK cv181x_base_riscv.dtsi:141 (IRQ 29), TRM
+ * system-control (remap 0x154, int_mux 0x298), dma-mapping.h (CVI_SPI2_RX 20, _TX 21).
+ * UNVERIFIED on hw. BOARD_SPI_DMA 0 (-DBOARD_SPI_DMA=0) keeps the polled path only. */
+#define BOARD_HAS_DMA       1
+#define BOARD_SYSCTL_BASE   0x03000000UL
+#define BOARD_DMAC_BASE     0x04330000UL
+#define BOARD_DMAC_IRQ      29
+#define BOARD_SPI_DMA_RX_REQ 20
+#define BOARD_SPI_DMA_TX_REQ 21
+#ifndef BOARD_SPI_DMA
+#define BOARD_SPI_DMA       1
+#endif
 #endif

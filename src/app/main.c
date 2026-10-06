@@ -77,7 +77,8 @@ void main(uint64_t hartid, uint64_t fdt)
         spi_dump();
         uart_puts("m4: audio link up (SPI2 mode 3, DRQ A27 irq ");
         uart_put_dec(BOARD_GPIO_IRQ);
-        uart_puts("); 't' = force one transfer\n");
+        uart_puts("); 't' = force one transfer, 'd' = toggle SPI DMA (now ");
+        uart_puts(audio_link_dma_active() ? "on)\n" : "off)\n");
     } else {
         uart_puts("m4: audio link init FAILED (CTRLR0 readback)\n");
     }
@@ -127,6 +128,10 @@ void main(uint64_t hartid, uint64_t fdt)
             uart_puts(" txdrop "); uart_put_dec(uart_tx_dropped);
             uart_putc('\n');
             last_frames = fr;
+            uart_puts("dma: "); uart_puts(audio_link_dma_active() ? "on" : "off");
+            uart_puts(" frames "); uart_put_dec(l->dma_frames);
+            uart_puts(" err "); uart_put_dec(l->dma_err);
+            uart_putc('\n');
             if (l->xfer_ticks) {
                 /* 528 B = 4224 bits; ticks are 25 MHz rdtime. Gaps/overhead show as
                  * eff < ideal (ideal = SCK). */
@@ -144,6 +149,11 @@ void main(uint64_t hartid, uint64_t fdt)
                 uart_puts("reset\n");
                 uart_sync();
                 board_reset();
+            }
+            if (c == 'd') {                        /* M5: DMA <-> polled SPI frames */
+                audio_link_set_dma(!audio_link_dma_active());
+                uart_puts(audio_link_dma_active() ? "link: SPI DMA on\n" : "link: SPI polled\n");
+                continue;
             }
             if (c == 't') {                        /* M4: scope trigger, no DRQ needed */
                 audio_link_kick();

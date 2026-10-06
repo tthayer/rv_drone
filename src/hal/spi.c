@@ -4,13 +4,18 @@
  * own CS blips whenever the TX FIFO momentarily empties, which the Pico slave
  * read as short frames. SER=1 is still needed to clock. spi_xfer() keeps the
  * FIFO topped up and masks S-mode interrupts for the ~0.55 ms frame.
- * TODO(DMA): later via the DW AXI DMAC at 0x04330000 (+ T-Head cache ops); then
- * the frame is a single descriptor and the IRQ masking goes away. */
+ * spi_xfer_dma_start() is the same frame done by the sysDMA (dma.c) with
+ * T-Head cache ops (cache.c): one TX and one RX channel on the SSI's hardware
+ * handshake, IRQs stay on, completion arrives as a callback from the DMA IRQ. */
 #include "spi.h"
 #include "board.h"
 #include "pinmux.h"
 #include "timer.h"
 #include "uart.h"
+#ifdef BOARD_HAS_DMA
+#include "cache.h"
+#include "dma.h"
+#endif
 
 #define R32(base, o) (*(volatile uint32_t *)(uintptr_t)((base) + (o)))
 #define SSI(o)  R32(BOARD_SPI_BASE, o)
@@ -27,6 +32,9 @@
 #define SR     0x28
 #define RISR   0x34
 #define ICR    0x48
+#define DMACR  0x4c                /* [0] RDMAE [1] TDMAE */
+#define DMATDLR 0x50               /* TX request while level <= TDLR */
+#define DMARDLR 0x54               /* RX request while level >= RDLR + 1 */
 #define IDR    0x58
 #define VERSION 0x5c
 #define DR     0x60
@@ -168,4 +176,154 @@ int spi_xfer(const uint8_t *tx, uint8_t *rx, size_t n)
     if (sst & 2)
         __asm__ volatile("csrsi sstatus, 2");
     return rc;
+}
+
+#ifdef BOARD_HAS_DMA
+/* DMA channels / handshake slots: RX = 0, TX = 1 (slot -> SPI2 request line via
+ * sdma_dma_ch_remap0, TRM: dma_rx_req_spi2 = 20, dma_tx_req_spi2 = 21). */
+#define DMA_CH_RX   0u
+#define DMA_CH_TX   1u
+#define DMA_SPI_WAIT_TICKS (BOARD_TIMEBASE_HZ / 20000)    /* 50 us for BUSY to clear */
+
+static struct {
+    spi_done_fn cb;
+    uint8_t *rx;
+    size_t n;
+    volatile int active;
+} sd;
+static int dma_ready;
+
+static void spi_dma_hw_off(void)
+{
+    R32(BOARD_SPI_CS_GPIO, 0x00) |= 1u << BOARD_SPI_CS_BIT;     /* CS high */
+    SSI(SER) = 0;
+    SSI(DMACR) = 0;
+    SSI(SSIENR) = 0;
+    (void)SSI(ICR);
+}
+
+static void spi_dma_finish(int rc)
+{
+    if (rc == 0 && dma_busy(DMA_CH_TX)) {          /* RX done but TX channel still going */
+        dma_abort(DMA_CH_TX);
+        rc = -2;
+    }
+    uint64_t dead = rdtime() + DMA_SPI_WAIT_TICKS;
+    while ((SSI(SR) & SR_BUSY) && rdtime() < dead)
+        ;
+    if (rc == 0)
+        rc = (SSI(SR) & SR_BUSY) ? -4 : (int)(SSI(RISR) & RISR_ERR);
+    spi_dma_hw_off();
+    cache_inval(sd.rx, sd.n);                      /* drop any lines prefetched during the frame */
+    spi_done_fn cb = sd.cb;
+    sd.active = 0;
+    if (cb)
+        cb(rc);
+}
+
+static void spi_dma_rx_cb(unsigned ch, uint32_t st)
+{
+    (void)ch;
+    if (!sd.active)
+        return;
+    if (st & DMA_ST_ERR) {
+        dma_abort(DMA_CH_TX);
+        spi_dma_finish(-3);
+    } else if (st & DMA_ST_DONE) {
+        spi_dma_finish(0);
+    }
+}
+
+static void spi_dma_tx_cb(unsigned ch, uint32_t st)
+{
+    (void)ch;
+    if (sd.active && (st & DMA_ST_ERR)) {
+        dma_abort(DMA_CH_RX);
+        spi_dma_finish(-3);
+    }
+}
+
+int spi_dma_init(void)
+{
+    dma_ready = 0;
+    cache_init();
+    if (!cache_ok() || fifo_depth < 4)
+        return -1;
+    if (dma_init() != 0)
+        return -2;
+    dma_map_request(DMA_CH_RX, BOARD_SPI_DMA_RX_REQ);
+    dma_map_request(DMA_CH_TX, BOARD_SPI_DMA_TX_REQ);
+    dma_ready = 1;
+    return 0;
+}
+
+int spi_dma_busy(void) { return sd.active; }
+
+int spi_xfer_dma_start(const uint8_t *tx, uint8_t *rx, size_t n, spi_done_fn cb)
+{
+    if (!dma_ready || sd.active || n == 0 || n > DMA_MAX_BLOCK)
+        return -1;
+    sd.cb = cb;
+    sd.rx = rx;
+    sd.n = n;
+
+    cache_clean(tx, n);                            /* device reads TX from DDR */
+    cache_flush(rx, n);                            /* no dirty RX line may be written back later */
+
+    /* Enable the SSI (CS low first) BEFORE arming the DMA. With the SSI
+     * disabled, its TX request was already asserted, so the DMAC wrote the
+     * first 16 bytes into a FIFO held in reset. They were lost, Pico A saw
+     * 512-byte frames, and the RX channel waited forever for 16 more. */
+    SSI(SSIENR) = 0;
+    SSI(DMATDLR) = fifo_depth / 2;
+    SSI(DMARDLR) = 0;                        /* RX request at >= 1 entry */
+    R32(BOARD_SPI_CS_GPIO, 0x00) &= ~(1u << BOARD_SPI_CS_BIT);  /* CS low */
+    SSI(SER) = 1;
+    SSI(SSIENR) = 1;                               /* FIFOs live; nothing to send yet */
+    SSI(DMACR) = 3;                                /* TDMAE | RDMAE */
+    sd.active = 1;
+
+    if (dma_start_p2m(DMA_CH_RX, DMA_CH_RX, BOARD_SPI_BASE + DR, rx, n, spi_dma_rx_cb) != 0 ||
+        dma_start_m2p(DMA_CH_TX, DMA_CH_TX, tx, BOARD_SPI_BASE + DR, n, spi_dma_tx_cb) != 0) {
+        dma_abort(DMA_CH_RX);
+        dma_abort(DMA_CH_TX);
+        sd.active = 0;
+        spi_dma_hw_off();
+        return -2;
+    }
+    /* TX DMA now fills the live FIFO and clocks start. */
+    (void)SSI(ICR);
+    return 0;
+}
+
+void spi_xfer_dma_abort(void)
+{
+    uint64_t sst;
+    __asm__ volatile("csrrci %0, sstatus, 2" : "=r"(sst));
+    dma_abort(DMA_CH_RX);
+    dma_abort(DMA_CH_TX);
+    sd.active = 0;
+    spi_dma_hw_off();
+    if (sst & 2)
+        __asm__ volatile("csrsi sstatus, 2");
+}
+#else
+int spi_dma_init(void) { return -1; }
+int spi_dma_busy(void) { return 0; }
+int spi_xfer_dma_start(const uint8_t *tx, uint8_t *rx, size_t n, spi_done_fn cb)
+{ (void)tx; (void)rx; (void)n; (void)cb; return -1; }
+void spi_xfer_dma_abort(void) {}
+#endif
+
+void spi_dump_rt(void)           /* bring-up: live SSI state */
+{
+    uart_puts("ssi: en ");  uart_put_hex(SSI(SSIENR));
+    uart_puts(" sr ");      uart_put_hex(SSI(SR));
+    uart_puts(" txflr ");   uart_put_hex(SSI(0x20));
+    uart_puts(" rxflr ");   uart_put_hex(SSI(RXFLR));
+    uart_puts(" risr ");    uart_put_hex(SSI(RISR));
+    uart_puts(" dmacr ");   uart_put_hex(SSI(DMACR));
+    uart_puts(" ser ");     uart_put_hex(SSI(0x10));
+    uart_puts(" ctrlr0 ");  uart_put_hex(SSI(0x00));
+    uart_putc('\n');
 }

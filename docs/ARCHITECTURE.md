@@ -348,7 +348,15 @@ also run on the host (`emu/`).
 
 - **Cache coherency:** the C906 doesn't snoop DMA. Clean the TX buffer and
   invalidate the RX buffer with T-Head CMO (`th.dcache.cva` / `th.dcache.iva`),
-  or place both in an uncached region. Decided in M4.
+  or place both in an uncached region. Decided: T-Head CMO from S-mode
+  (`src/hal/cache.c`; the vendor FSBL sets mxstatus.THEADISAEE, OpenSBI v1.8.1
+  does not touch it; a boot-time probe falls back to polled SPI if it traps).
+- **SPI2 DMA (M5, `src/hal/dma.c`, `spi.c`):** sysDMA = DW_axi_dmac at
+  0x04330000, PLIC 29, IRQ routed to the big C906 via `sdma_dma_int_mux`
+  (0x03000298 [18:10]); handshake slots 0/1 remapped to SPI2 RX/TX (req 20/21)
+  in `sdma_dma_ch_remap0` (0x03000154). `BOARD_SPI_DMA=0` (EXTRA_CFLAGS) or
+  the `d` console key selects the polled path; 3 consecutive DMA faults fall
+  back to polled automatically. UNVERIFIED on hardware.
 - **Little core (C906L):** unused. The FSBL starts the vendor `cvirtos.bin`
   on it (see Unverified), and it will later be replaced by a parking loop.
 
@@ -510,6 +518,9 @@ Behaviour:
 - That SPI2 really runs at 187.5 MHz as decoded, that a 528 B frame streams
   back to back in mode 3, and GPIO0's PLIC source (60). M4 checks these.
 - That SD is SDHCI.
+- **SPI2 DMA:** DMAC register layout and single-LLI transfers with 8-bit beats,
+  the handshake remap, the DMA IRQ route (int_mux), S-mode T-Head CMO and
+  CS-low-to-first-SCK latency (a few us with DMA vs ~0 polled).
 - **Little core:** since 2026-10-05 the fip carries `build/park.bin`
   instead of the vendor `cvirtos.bin`. The FSBL still releases the C906L,
   but it only runs a `wfi` loop at 0x83F40000. The top 2 MB (0x8FE00000+)

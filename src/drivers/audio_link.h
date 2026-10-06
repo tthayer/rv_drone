@@ -3,7 +3,8 @@
 #include <stdint.h>
 
 /* rvlink master (Nano side): one 528 B full-duplex SPI2 transaction per DRQ rising
- * edge from Pico A. M4 sends the test pattern (RVLINK_F_TEST). Not available on
+ * edge from Pico A. M4 sends the test pattern (RVLINK_F_TEST). With BOARD_SPI_DMA the
+ * frame is run by the sysDMA under IRQ (main loop only post-processes); else polled. Not available on
  * boards without BOARD_HAS_SPI_LINK (qemu): init returns -1, everything else no-ops. */
 typedef struct {
     uint32_t frames;          /* completed transactions */
@@ -17,11 +18,15 @@ typedef struct {
     uint16_t slave_seq_echo, slave_crc_err, slave_underruns;
     uint8_t  slave_ring_fill;
     uint16_t seq;             /* next seq to send */
+    uint32_t dma_frames;      /* frames completed through the DMA path */
+    uint32_t dma_err;         /* DMA faults + watchdog aborts (3 in a row -> polled) */
 } audio_link_stats_t;
 
 int  audio_link_init(void);
 int  audio_link_pending(void);        /* a DRQ edge is waiting for audio_link_poll() */
 void audio_link_poll(void);           /* run the pending transaction, if any (main loop) */
 void audio_link_kick(void);           /* force one transaction without DRQ (scope/debug) */
+int  audio_link_dma_active(void);     /* 1 = frames run by DMA, 0 = polled spi_xfer() */
+void audio_link_set_dma(int on);      /* runtime switch (ignored mid-frame); on needs CMO + DMAC */
 const volatile audio_link_stats_t *audio_link_stats(void);
 #endif
