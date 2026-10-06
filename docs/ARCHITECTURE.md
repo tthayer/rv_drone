@@ -396,7 +396,7 @@ Synthesis is `float` on the Nano. RVV 0.7.1 is a later optimisation.
 | M0 ✅ | Nano toolchain, linker, `start.S`, fip packaging, LED | LED1 toggles from an SD boot (2026-10-01) |
 | M1 ✅ | Nano UART0 via FTDI; traps, PLIC, SBI timer IRQ | Boot log captured; 1 kHz tick, `time` +25,000,000/s; UART RX IRQ echo (2026-10-05) |
 | M2 ✅ | Pico SDK tree; Pico A PIO I2S at 153.6 MHz sysclk | Clean 440 Hz sine from the PCM5102A; 10 min soak, 0 late refills, 750±1 blocks/s (2026-10-06) |
-| M3 | Pico B: encoders, switches, 3 OLEDs, MIDI (Unit MIDI) | Events printed over USB CDC; a test pattern on all 3 OLEDs |
+| M3 ✅ | Pico B: encoders, switches, 3 OLEDs, MIDI (Unit MIDI) | 6 encoders, 6 switches, 3 OLEDs (0x3C/0x3D on I2C0, 0x3C on I2C1) and MIDI in all working (2026-10-06) |
 | M4 | Nano pinmux, GPIO IRQ, SPI2 master + DMA, cache handling | Logic-analyser check of SPI2 mode 3 at 8 MHz |
 | M5 | rvlink end to end | The Nano's sine plays via Pico A; 0 CRC errors and 0 underruns over 10 min |
 | M6 | Nano UART2 + rvpanel end to end | Encoders and MIDI reach the Nano; the Nano draws on all 3 OLEDs |
@@ -407,8 +407,11 @@ Synthesis is `float` on the Nano. RVV 0.7.1 is a later optimisation.
 ### Status (2026-10-06)
 
 **Done:**
-- **M0, M1 and M2:** done on hardware. Pico A plays a clean 440 Hz tone
-  through the PCM5102A. Flash it with `make pico-flash-audio`.
+- **M0–M3:** done on hardware.
+  - Pico A plays a clean 440 Hz tone through the PCM5102A
+    (`make pico-flash-audio`).
+  - Pico B reads 6 encoders, 6 switches and MIDI, and drives 3 OLEDs
+    (`make pico-flash-panel`).
 - **USB boot dev loop:** `make usbboot RESET_PORT=…` takes about 20 s from
   Ctrl-R to the running image, with no SD card. The C906L is parked by
   `build/park.bin`.
@@ -416,18 +419,12 @@ Synthesis is `float` on the Nano. RVV 0.7.1 is a later optimisation.
   per-second PLIC counters). Trim them once M4 is stable.
 
 **Next:**
-- **M3:** Pico B panel (encoders, switches, 3 OLEDs, MIDI).
 - **M4:** Nano SPI2 on P18/P21/P22/P23. Measure P22 for 3.3 V first.
 
 **Optional:**
 - **Faster USB boot:** slim OpenSBI (generic platform with only the 8250,
   ACLINT, PLIC and T-Head drivers) so the ROM stops re-requesting its
   276 KB window.
-
-**Hardware to build or buy:**
-- 6 encoders;
-- move OLED 1 to 0x3D;
-- Unit MIDI in Bypass mode, wired to Pico B GP21.
 
 ## References
 
@@ -478,9 +475,7 @@ Synthesis is `float` on the Nano. RVV 0.7.1 is a later optimisation.
 - The SPI2 input clock rate (`CV181X_CLK_SPI`), and that it streams back to
   back in mode 3. M4 checks this.
 - That SD is SDHCI.
-- **The little core is not idle.** fiptool requires `--rtos`, so the FSBL
-  loads the vendor `cvirtos.bin` to 0x83F40000 and releases the C906L.
-  Until that image is replaced with a parking loop:
-  - keep our heap and buffers clear of that region and of the top 2 MB
-    (0x8FE00000+);
-  - expect the RTOS may touch peripherals such as the mailbox.
+- **Little core:** since 2026-10-05 the fip carries `build/park.bin`
+  instead of the vendor `cvirtos.bin`. The FSBL still releases the C906L,
+  but it only runs a `wfi` loop at 0x83F40000. The top 2 MB (0x8FE00000+)
+  stays reserved in the DTS.
