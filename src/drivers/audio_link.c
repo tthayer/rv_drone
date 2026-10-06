@@ -19,11 +19,21 @@ const volatile audio_link_stats_t *audio_link_stats(void) { return &st; }
 static rvlink_m2s_t tx_frame __attribute__((aligned(64)));
 static rvlink_s2m_t rx_frame __attribute__((aligned(64)));
 static volatile uint32_t pending;
+static volatile uint64_t xfer_end;     /* rdtime() when the last frame finished */
+static volatile int in_xfer;
+#define DRQ_HOLDOFF (BOARD_TIMEBASE_HZ / 50000)   /* 20 us */
 static volatile audio_link_stats_t st = { .xfer_ticks_min = 0xffffffffu };
 
 static void drq_isr(void)
 {
     st.drq_edges++;
+    /* Edges latched during a frame (SCK crosstalk, IRQs masked) fire just after
+     * it, while Pico A has not yet dropped DRQ. The next real request comes
+     * at least ~300 us later. */
+    if (in_xfer || rdtime() - xfer_end < DRQ_HOLDOFF) {
+        st.spurious++;
+        return;
+    }
     if (pending)
         st.missed++;
     pending = 1;
@@ -74,8 +84,11 @@ void audio_link_poll(void)
     }
 
     uint64_t t0 = rdtime();
+    in_xfer = 1;
     int rc = spi_xfer((const uint8_t *)&tx_frame, (uint8_t *)&rx_frame, RVLINK_FRAME_LEN);
     uint32_t dt = (uint32_t)(rdtime() - t0);
+    xfer_end = rdtime();
+    in_xfer = 0;
     pending = 0;            /* edges latched during the frame are crosstalk */
     st.xfer_ticks = dt;
     if (dt < st.xfer_ticks_min)
@@ -101,6 +114,33 @@ void audio_link_poll(void)
         }
     } else if (!rvlink_check(&rx_frame)) {
         st.rx_crc_err++;
+        static uint64_t next_dump2;
+        if (rdtime() >= next_dump2) {   /* bring-up: where does the frame break? */
+            next_dump2 = rdtime() + BOARD_TIMEBASE_HZ;
+            const uint8_t *b = (const uint8_t *)&rx_frame;
+            for (unsigned i = 12; i < RVLINK_FRAME_LEN - 4; i++) {
+                uint8_t want = (uint8_t)(0xA5u ^ (i - 12u));
+                if (b[i] != want) {
+                    uart_puts("link: crc bad, first diff at ");
+                    uart_put_dec(i);
+                    uart_puts(":");
+                    for (unsigned k = i; k < i + 6 && k < RVLINK_FRAME_LEN; k++) {
+                        uart_putc(' ');
+                        uart_putc("0123456789abcdef"[b[k] >> 4]);
+                        uart_putc("0123456789abcdef"[b[k] & 15]);
+                    }
+                    uart_puts("  want");
+                    for (unsigned k = i; k < i + 6; k++) {
+                        uint8_t w = (uint8_t)(0xA5u ^ (k - 12u));
+                        uart_putc(' ');
+                        uart_putc("0123456789abcdef"[w >> 4]);
+                        uart_putc("0123456789abcdef"[w & 15]);
+                    }
+                    uart_putc('\n');
+                    break;
+                }
+            }
+        }
     } else {
         st.slave_seq_echo = rx_frame.seq_echo;
         st.slave_ring_fill = rx_frame.ring_fill;

@@ -23,13 +23,65 @@ static inline volatile uint8_t *reg(unsigned n)
     return (volatile uint8_t *)(BOARD_UART_BASE + ((uintptr_t)n << BOARD_UART_SHIFT));
 }
 
+/* TX: polled until uart_async_tx() is on; then a ring drained from the 1 kHz
+ * tick, at most 16 bytes per tick into the (empty) TX FIFO: 16 kB/s against the
+ * 11.5 kB/s line, so printing never stalls the caller. Single producer
+ * (non-ISR code), single consumer (tick). Full ring: drop and count. */
+#define TX_N 4096
+static volatile uint8_t tx_buf[TX_N];
+static volatile uint32_t tx_head, tx_tail;
+static volatile int tx_async;
+uint32_t uart_tx_dropped;
+
+static void putc_raw(uint8_t c)
+{
+    while (!(*reg(UART_LSR) & LSR_THRE))
+        ;
+    *reg(UART_THR) = c;
+}
+
+static void putc_one(uint8_t c)
+{
+    if (!tx_async) {
+        putc_raw(c);
+        return;
+    }
+    uint32_t h = tx_head;
+    if (h - tx_tail >= TX_N) {
+        uart_tx_dropped++;
+        return;
+    }
+    tx_buf[h % TX_N] = c;
+    tx_head = h + 1;
+}
+
 void uart_putc(char c)
 {
     if (c == '\n')
-        uart_putc('\r');
-    while (!(*reg(UART_LSR) & LSR_THRE))
-        ;
-    *reg(UART_THR) = (uint8_t)c;
+        putc_one('\r');
+    putc_one((uint8_t)c);
+}
+
+void uart_async_tx(int on) { tx_async = on; }
+
+void uart_tx_drain(void)
+{
+    if (!(*reg(UART_LSR) & LSR_THRE))           /* FIFO not yet empty */
+        return;
+    uint32_t t = tx_tail;
+    for (int n = 0; n < 16 && t != tx_head; n++, t++)
+        *reg(UART_THR) = tx_buf[t % TX_N];
+    tx_tail = t;
+}
+
+/* Fault path: drop back to polled output and flush what is queued. */
+void uart_sync(void)
+{
+    tx_async = 0;
+    while (tx_tail != tx_head) {
+        putc_raw(tx_buf[tx_tail % TX_N]);
+        tx_tail = tx_tail + 1;
+    }
 }
 
 void uart_puts(const char *s)

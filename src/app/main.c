@@ -70,6 +70,7 @@ void main(uint64_t hartid, uint64_t fdt)
     __asm__ volatile("csrs sie, %0" :: "r"((1u << 5) | (1u << 9)));  /* STIE|SEIE */
     __asm__ volatile("csrsi sstatus, 2");                            /* SIE */
     uart_puts("m1: irqs on\n");
+    uart_async_tx(1);                  /* from here prints never block */
 
 #ifdef BOARD_HAS_SPI_LINK
     if (audio_link_init() == 0) {
@@ -123,6 +124,7 @@ void main(uint64_t hartid, uint64_t fdt)
             uart_puts(")  total "); uart_put_dec(fr);
             uart_puts(" drq "); uart_put_dec(l->drq_edges);
             uart_puts(" spi_err "); uart_put_dec(l->spi_err);
+            uart_puts(" txdrop "); uart_put_dec(uart_tx_dropped);
             uart_putc('\n');
             last_frames = fr;
             if (l->xfer_ticks) {
@@ -140,6 +142,7 @@ void main(uint64_t hartid, uint64_t fdt)
         while ((c = uart_getc_nonblock()) >= 0) {
             if (c == 0x12) {                       /* Ctrl-R: reset (usbboot) */
                 uart_puts("reset\n");
+                uart_sync();
                 board_reset();
             }
             if (c == 't') {                        /* M4: scope trigger, no DRQ needed */

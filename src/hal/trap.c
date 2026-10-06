@@ -15,6 +15,7 @@ void trap_init(void)
 
 static void fatal(const struct trap_frame *f)
 {
+    uart_sync();
     uart_puts("\n*** TRAP scause=");
     uart_put_hex(f->scause);
     uart_puts(" sepc=");

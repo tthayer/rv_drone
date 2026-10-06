@@ -100,7 +100,10 @@ static void dma_setup_and_enable(void) {
     link_armed = true;
 }
 
+static uint32_t last_rem = RVLINK_FRAME_LEN;   // rx remaining at the last tick
+
 static void link_arm(bool new_reply) {
+    last_rem = RVLINK_FRAME_LEN;
     link_armed = false;
     if (new_reply)
         link_build_reply(&stats, *underruns_src, &tx_buf);
@@ -118,25 +121,27 @@ static void __isr link_dma_irq(void) {
 }
 
 // CS rising edge: normally the end of a frame (RX DMA done or about to be).
-static void cs_gpio_cb(uint gpio, uint32_t events) {
-    (void)events;
-    if (gpio != PIN_CS || !link_armed) return;
-    busy_wait_us_32(2);                 // let the last byte reach memory via DMA
-    for (int i = 0; i < 20 && !pio_sm_is_rx_fifo_empty(link_pio, link_sm); i++)
-        busy_wait_us_32(1);             // drain bytes still queued in RXF
-    if (!gpio_get(PIN_CS)) return;              // CS low again: a blip, not frame end
-    if (!dma_channel_is_busy(rx_ch)) return;    // completed; DMA IRQ handles it
-    uint32_t rem = rx_remaining();
-    if (rem == RVLINK_FRAME_LEN) return;        // CS glitch, nothing received
-    link_armed = false;
-    gpio_put(PIN_DRQ, 0);
-    stats.short_err++;
-    link_arm(false);
-}
-
+// Short frames are detected here, at the block tick, instead of with a CS
+// edge IRQ: on the breadboard, CS edge events fired mid-frame and restarted
+// the SM while the Nano was still clocking. A frame takes ~0.54 ms at 7.8 MHz
+// and ticks are 1.33 ms apart, so no progress since the last tick means the
+// frame is stale. Clear it before raising the next request.
 void link_spi_on_block(void) {
     if (!link_armed || !dma_channel_is_busy(rx_ch)) return;
-    if (rx_remaining() != RVLINK_FRAME_LEN) return;     // frame in flight
+    uint32_t rem = rx_remaining();
+    if (rem != RVLINK_FRAME_LEN) {                      // partial frame
+        if (rem == last_rem) {                          // stalled for a whole tick
+            link_armed = false;
+            gpio_put(PIN_DRQ, 0);
+            stats.short_err++;
+            last_rem = RVLINK_FRAME_LEN;
+            link_arm(false);
+        } else {
+            last_rem = rem;                             // still moving: in flight
+        }
+        return;
+    }
+    last_rem = RVLINK_FRAME_LEN;
     if (gpio_get_out_level(PIN_DRQ)) {
         gpio_put(PIN_DRQ, 0);           // previous request unserved: new edge
         busy_wait_us_32(2);
@@ -169,6 +174,4 @@ void link_spi_init(const volatile uint32_t *src) {
 
     link_arm(true);
 
-    gpio_set_irq_enabled_with_callback(PIN_CS, GPIO_IRQ_EDGE_RISE, true, cs_gpio_cb);
-    irq_set_priority(IO_IRQ_BANK0, PRIO_LINK);
 }
