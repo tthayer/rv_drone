@@ -8,7 +8,6 @@
 #define VALUE_Y      26          /* row c */
 #define BAR_Y        50          /* row d */
 #define BAR_H        7
-#define COUNTS_PER_DETENT 2      /* quadrature counts per click (KY-040 / EC11 on Pico B PIO) */
 #define MIDI_FLASH_MS 120
 #define TOUCH_MS     400         /* a half is highlighted this long after a change */
 
@@ -39,9 +38,9 @@ void ui_enc(int id, int delta)
 {
     if (id < 0 || id > 5) return;
     enc_accum[id] += delta;
-    int det = enc_accum[id] / COUNTS_PER_DETENT;
+    int det = enc_accum[id] / UI_COUNTS_PER_DETENT;
     if (!det) return;
-    enc_accum[id] -= det * COUNTS_PER_DETENT;
+    enc_accum[id] -= det * UI_COUNTS_PER_DETENT;
     int p = page_param(id);
     const param_desc_t *d = param_desc(p);
     int mag = det < 0 ? -det : det;

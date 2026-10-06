@@ -474,14 +474,14 @@ Behaviour:
 | M4 ✅ | Nano pinmux, GPIO IRQ, SPI2 master (polled); Pico A PIO SPI slave | rvlink test pattern at 7.8 MHz: 10 min soak, 433k frames, 4 CRC errors, 0 pattern errors (2026-10-06). DMA + cache moved to M5 |
 | M5 ✅ | rvlink end to end | Nano 330 Hz sine plays via Pico A's ring: 10 min soak, 457k frames, 0 CRC errors, 0 underruns, 0 late refills (2026-10-06) |
 | M6 ✅ | Nano UART2 + rvpanel end to end | 6 encoders, 6 switches and MIDI reach the Nano; the Nano draws all 3 OLEDs; 0 link errors in steady state (2026-10-06) |
-| M7 | Drone engine + `emu/` host build | Engine plays on the host, then on hardware via the panel and MIDI |
+| M7 ✅ | Drone engine + `emu/` host build | Engine plays on the host, then on hardware via the panel and MIDI |
 | M8 | SDHCI + FatFs presets | Save and load across power cycles |
 | M9 | Perf (RVV), enclosure, single 5 V supply | CPU headroom ≥ 50 % at 4 voices |
 
 ### Status (2026-10-06)
 
 **Done:**
-- **M0–M6:** done on hardware. The Nano renders audio and streams it over
+- **M0–M7:** done on hardware. The Nano renders audio and streams it over
   rvlink (SPI2 DMA, 7.8 MHz) into Pico A's ring and out of the PCM5102A.
   - Pico A plays a clean 440 Hz tone through the PCM5102A
     (`make pico-flash-audio`).
@@ -516,18 +516,20 @@ Behaviour:
   - Follow-ups: pull-up on the Nano's UART2 RX pad (A29): with Pico B
     unpowered the line floats and the decoder counts noise as COBS/CRC
     errors. MIDI realtime (clock) is not forwarded yet.
-- **M7 (in progress, 2026-10-06):** drone engine + `emu/`.
+- **M7 ✅ (2026-10-06):** drone engine + `emu/`.
   - `src/engine/` (engine.c, params.c, dsp.h: no libm, identical on host and
     Nano), `src/ui/ui.c` (4 pages × 6 params, MIDI routing),
     `src/app/panel_ui.c` (panel glue), `emu/main.c` (SDL2 window + audio,
     `--wav` offline render with level stats; `make emu`, `make emu-wav`).
   - Host: default drone renders clean (peak −6 dBFS, no NaN/DC; spectrum
     shows D2/A2 partials and the sub octave).
-  - Nano: 240–290 µs per 64-frame block = 18–21 % of the budget with 1–2
-    voices × 5 oscillators; link clean (345k frames, 0 late, ring 4).
-  - Open: verify encoders/pages/MIDI driving the engine on hardware; measure
-    worst case (4 voices × 7 oscillators). Pico A's PCM5102A module drops
-    out intermittently (digital side verified clean: suspect XSMT/jack).
+  - Hardware: encoders/pages and MIDI chords drive the engine. Render cost
+    per 64-frame block: 290 µs (2 voices × 5 osc), 444 µs worst case
+    (4 voices × 7 osc, console key `w`) = 33 % of the 1333 µs budget.
+  - Encoders: 4 quadrature counts per click on all six (`UI_COUNTS_PER_DETENT`).
+  - Audio noise/dropouts were a ground loop through the laptop charger
+    (cleared on battery); not the PCM5102A module.
+- **Next: M8** — SDHCI + FatFs presets.
 
 **Optional:**
 - **Faster USB boot:** slim OpenSBI (generic platform with only the 8250,

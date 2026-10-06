@@ -161,7 +161,7 @@ int main(int argc, char **argv) {
                 SDL_GetMouseState(&mx, &my);
                 int h = half_at(mx, my);
                 int d = e.wheel.y;
-                if (h >= 0 && d) ui_enc(h, d * 2);      // 2 counts = one detent
+                if (h >= 0 && d) ui_enc(h, d * UI_COUNTS_PER_DETENT);   // one detent per wheel step
                 break;
             }
             case SDL_MOUSEBUTTONDOWN:

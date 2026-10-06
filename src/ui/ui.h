@@ -8,6 +8,9 @@
 #include "fb.h"
 
 #define UI_DISPLAYS 3
+/* Pico B forwards raw quadrature counts: one full cycle (4 counts) per click on
+ * both the KY-040 modules and the bare EC11 (measured 2026-10-06). */
+#define UI_COUNTS_PER_DETENT 4
 
 void ui_init(void);                          /* after engine_init(): reads defaults */
 void ui_enc(int id, int delta);              /* id 0..5, raw quadrature counts */

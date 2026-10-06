@@ -260,6 +260,23 @@ void main(uint64_t hartid, uint64_t fdt)
                 uart_puts(audio_link_test_mode() ? "link: test pattern\n" : "link: audio\n");
                 continue;
             }
+#ifdef BOARD_HAS_SPI_LINK
+            if (c == 'w') {                        /* M7: worst-case load, 4 voices x 7 osc */
+                uint8_t cc[3] = { 0xB0, 20 + P_OSCS, 127 };
+                ui_midi(cc, 3, 0);
+                static const uint8_t chord[4] = { 38, 45, 50, 57 };
+                for (int i = 0; i < 4; i++) {
+                    uint8_t on[3] = { 0x90, chord[i], 100 };
+                    ui_midi(on, 3, 0);
+                }
+                for (int i = 0; i < 4; i++) {
+                    uint8_t off[3] = { 0x80, chord[i], 0 };
+                    ui_midi(off, 3, 0);
+                }
+                uart_puts("engine: worst case (OSCS 7, 4 voices latched)\n");
+                continue;
+            }
+#endif
             if (c == 't') {                        /* M4: scope trigger, no DRQ needed */
                 audio_link_kick();
                 continue;
