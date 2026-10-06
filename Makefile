@@ -69,7 +69,7 @@ usbboot: fip
 	$(if $(RESET_PORT),stty -f $(RESET_PORT) 115200 raw -echo clocal && printf '\022' > $(RESET_PORT))
 	$(PYTHON) tools/usbboot.py build/nano/fip.bin --magic $(USB_DL_MAGIC)
 
-# Pico firmware (Pico A audio now, Pico B panel later). Needs:
+# Pico firmware (Pico A audio, Pico B panel). Needs:
 #   tools/get-pico-sdk.sh, arm-none-eabi-gcc with newlib, ninja, cmake, picotool.
 # PICO_TOOLCHAIN_PATH is a bin dir; defaults to a user-local Arm GNU toolchain
 # (~/opt/arm-gnu-toolchain-*) if one is installed, else PATH is used.
@@ -80,11 +80,25 @@ pico:
 	      $(if $(PICO_TOOLCHAIN_PATH),-DPICO_TOOLCHAIN_PATH=$(PICO_TOOLCHAIN_PATH))
 	ninja -C build/firmware
 
-# Reboots a running Pico A (picotool reset interface) and loads the UF2.
+# Reboots a running Pico (picotool reset interface) and loads the UF2. With two
+# Picos on USB, select by USB serial: PICO_A_SER / PICO_B_SER (README, `picotool
+# info -a`); unset, picotool takes the only device it can find.
 pico-flash-audio: pico
-	picotool load -fx build/firmware/audio/audio.uf2
+	picotool load $(if $(PICO_A_SER),--ser $(PICO_A_SER)) -fx build/firmware/audio/audio.uf2
+
+pico-flash-panel: pico
+	picotool load $(if $(PICO_B_SER),--ser $(PICO_B_SER)) -fx build/firmware/panel/panel.uf2
+
+# Host tests for the panel logic (plain cc); also writes build/panel-test/*.pbm,
+# the OLED layouts rendered by the firmware's own render.c.
+test-panel:
+	@mkdir -p build/panel-test
+	cc -std=c11 -Wall -Wextra -Werror -Ifirmware/panel firmware/panel/test/test_midi.c firmware/panel/midi_parser.c -o build/panel-test/test_midi
+	cc -std=c11 -Wall -Wextra -Werror -Ifirmware/panel firmware/panel/test/test_debounce.c -o build/panel-test/test_debounce
+	cc -std=c11 -Wall -Wextra -Werror -Ifirmware/panel firmware/panel/test/test_render.c firmware/panel/render.c firmware/panel/fb.c firmware/panel/font5x7.c -o build/panel-test/test_render
+	build/panel-test/test_midi && build/panel-test/test_debounce && build/panel-test/test_render build/panel-test
 
 clean:
 	rm -rf build
 
-.PHONY: all run-qemu opensbi fip usbboot pico pico-flash-audio clean
+.PHONY: all run-qemu opensbi fip usbboot pico pico-flash-audio pico-flash-panel test-panel clean

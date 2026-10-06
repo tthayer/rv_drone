@@ -1,0 +1,80 @@
+;
+; Copyright (c) 2023 Raspberry Pi (Trading) Ltd.
+;
+; SPDX-License-Identifier: BSD-3-Clause
+;
+; Quadrature decoder, after pico-examples pio/quadrature_encoder
+; (quadrature_encoder.pio). The A and B pins must be adjacent GPIOs, A being
+; the lower one (the SM's IN base). Each state machine keeps a running 32-bit
+; position in X and pushes it (non-blocking) every pass of the loop, so the RX
+; FIFO holds recent positions and the CPU never has to keep up with the edges.
+;
+; The program must be loaded at instruction 0: the 16-entry jump table is
+; reached with "mov pc, isr". Any number of state machines on the same PIO can
+; share one copy.
+
+.program quadrature
+.origin 0
+
+; 16 values representing the previous (high two bits) and current (low two
+; bits) state of the A/B pins; each entry is one instruction.
+    jmp update          ; 00 -> 00
+    jmp decrement       ; 00 -> 01
+    jmp increment       ; 00 -> 10
+    jmp update          ; 00 -> 11 (missed an edge, ignore)
+    jmp increment       ; 01 -> 00
+    jmp update          ; 01 -> 01
+    jmp update          ; 01 -> 10 (missed an edge, ignore)
+    jmp decrement       ; 01 -> 11
+    jmp decrement       ; 10 -> 00
+    jmp update          ; 10 -> 01 (missed an edge, ignore)
+    jmp update          ; 10 -> 10
+    jmp increment       ; 10 -> 11
+    jmp update          ; 11 -> 00 (missed an edge, ignore)
+    jmp increment       ; 11 -> 01
+    jmp decrement       ; 11 -> 10
+    jmp update          ; 11 -> 11
+
+decrement:
+    jmp x-- update      ; X--, taken unless X was 0
+    jmp update          ; X was 0: it has wrapped to 0xFFFFFFFF, still done
+
+increment:
+    mov x, ~x           ; X++ as ~(~X - 1)
+    jmp x-- increment_cont
+increment_cont:
+    mov x, ~x
+
+.wrap_target
+update:
+    mov isr, x          ; publish the position
+    push noblock
+sample_pins:
+    out isr, 2          ; ISR = previous state (the low bits of OSR)
+    in pins, 2          ; ... followed by the new state
+    mov osr, isr        ; remember it for the next pass
+    mov pc, isr         ; jump through the table
+.wrap
+
+% c-sdk {
+#include "hardware/clocks.h"
+#include "hardware/gpio.h"
+
+// Claims nothing: the caller owns the SM. The program must already be at
+// offset 0 on this PIO (pio_add_program honours .origin).
+static inline void quadrature_program_init(PIO pio, uint sm, uint offset, uint pin) {
+    pio_sm_set_consecutive_pindirs(pio, sm, pin, 2, false);
+    pio_gpio_init(pio, pin);
+    pio_gpio_init(pio, pin + 1);
+    gpio_pull_up(pin);
+    gpio_pull_up(pin + 1);
+
+    pio_sm_config c = quadrature_program_get_default_config(offset);
+    sm_config_set_in_pins(&c, pin);
+    sm_config_set_in_shift(&c, false, false, 32);   // left, no autopush
+    sm_config_set_out_shift(&c, true, false, 32);   // right, no autopull
+    sm_config_set_clkdiv(&c, 1.0f);                 // full speed
+    pio_sm_init(pio, sm, offset, &c);
+    pio_sm_set_enabled(pio, sm, true);
+}
+%}

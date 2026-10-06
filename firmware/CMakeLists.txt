@@ -15,4 +15,4 @@ pico_sdk_init()
 
 add_subdirectory(common)
 add_subdirectory(audio)   # Pico A
-# add_subdirectory(panel) # Pico B (M3)
+add_subdirectory(panel)   # Pico B

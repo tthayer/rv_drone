@@ -12,7 +12,7 @@ The design, pin maps, link protocols and milestones are in
 `docs/ARCHITECTURE.md`.
 
 **Current state:** M2 is done: Pico A plays a 440 Hz tone over I2S. M1 is done too. The Nano boots from SD and runs a 1 kHz timer
-interrupt and an interrupt-driven UART0, and `make usbboot` boots it over USB. The Pico firmware is in `firmware/`; M2 (Pico A audio) is written but not yet verified on hardware.
+interrupt and an interrupt-driven UART0, and `make usbboot` boots it over USB. The Pico firmware is in `firmware/`; M2 (Pico A audio) is verified on hardware; M3 (Pico B panel) is written but not yet run on hardware.
 
 ## Toolchain
 
@@ -38,7 +38,7 @@ Get the SDK (pinned 2.3.1, with submodules, into `third_party/pico-sdk`):
 
 Build (`make pico` runs the cmake and ninja steps; output in `build/firmware/`):
 
-    make pico           # -> build/firmware/audio/audio.{elf,uf2}
+    make pico           # -> build/firmware/audio/audio.{elf,uf2} and build/firmware/panel/panel.{elf,uf2}
 
 Flash Pico A: either `make pico-flash-audio` (runs
 `picotool load -fx build/firmware/audio/audio.uf2`; it reboots a running Pico
@@ -63,6 +63,50 @@ Check your module, as boards differ. On the common purple modules:
 - FMT low = I2S.
 - XSMT high = unmuted; often a solder bridge or jumper to 3.3 V.
 - FLT low and DEMP low.
+
+### Pico B (panel), M3
+
+`make pico-flash-panel` loads `build/firmware/panel/panel.uf2` the same way.
+With both Picos on USB, pick one by its USB serial number: `PICO_A_SER` and
+`PICO_B_SER` make variables, which add `--ser <serial>` to `picotool load`:
+
+    make pico-flash-panel PICO_B_SER=E66...
+
+picotool 2.3.1 has no `list` command. `picotool info -a` shows what it finds
+(without arguments it lists BOOTSEL devices only; add `-f` to include running
+ones, which reboots them), and `system_profiler SPUSBDataType` shows each
+board's serial number on macOS. Which `picotool info` field prints the
+serial is unchecked.
+
+Wiring is in `docs/ARCHITECTURE.md` ("Pico B (panel)" pin table): 6 encoders
+(A/B on adjacent GPIOs), 6 switches, I2C0 on GP4/GP5 (OLED 0 at 0x3C, OLED 1
+at 0x3D), I2C1 on GP26/GP27 (OLED 2 at 0x3C), MIDI in on GP21. Nothing is
+required to be present: encoders and switches idle on pull-ups, and the boot
+banner lists which I2C addresses answered ("I2C0: 0x3C" etc.); only displays
+that ACK are driven.
+
+**OLED 1 must be at 0x3D.** On most SSD1306 modules, move the 0 Ω address
+resistor on the back from the 0x78 pad to the 0x7A pad. Until then it shares
+0x3C with OLED 0, so the firmware reports `I2C0: 0x3C` and `OLED1 ... not
+found`, and drives OLED 0 only.
+
+M5Stack Unit MIDI (Grove cable): white to GP21 (pin 27), red to VBUS (pin 40),
+black to GND, mode switch on **Bypass**. See the architecture doc for the
+reasoning and what is still unverified about the 3.5 mm input.
+
+The console (USB CDC) prints a banner (re-printed when a terminal connects),
+then `enc N delta D total T`, `sw N down|up` and `midi note_on ch C note N vel
+V` (also `note_off`, `cc`, `pitch_bend`, `program`; channels print as 1 to 16).
+Encoder totals are raw quadrature counts, usually 4 per detent; swap an
+encoder's A/B wires if it counts backwards. Each OLED shows its two encoders
+(total, position bar, last delta; a half inverts while its switch is held),
+with a MIDI activity box in the header. The display code is `render.c`; M6
+replaces it with pages from the Nano.
+
+Host tests of the MIDI parser, switch debounce and the OLED renderer (which
+also writes the three layouts as PBM images to `build/panel-test/`):
+
+    make test-panel
 
 ## Build (Nano)
 
