@@ -1,7 +1,8 @@
 // 128x64 1-bpp framebuffer in SSD1306 page layout (8 pages x 128 columns,
 // bit 0 of each byte is the top row of its page) plus a dirty-page mask.
 // No hardware: rendering code draws into one of these, and ssd1306.c flushes
-// the dirty pages. In M6 the Nano's PAGE packets go straight to fb_set_page().
+// the dirty pages. Shared: the Nano UI draws with it too, and Pico B puts the
+// Nano's PAGE packets straight into fb_set_page().
 #pragma once
 
 #include <stdbool.h>

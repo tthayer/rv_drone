@@ -52,4 +52,16 @@
 #ifndef BOARD_SPI_DMA
 #define BOARD_SPI_DMA       1
 #endif
+/* M6: UART2 panel link (Pico B). SDK cv181x_base.dtsi serial@04160000 (25 MHz,
+ * reg-shift 2), cv181x_base_riscv.dtsi:190 (PLIC 46), clk-cv181x.c (CLK_EN_1 bit 18
+ * clk_uart2, bit 19 clk_apb_uart2), cv181x-resets.h (RST_UART2 = SOFT_RSTN_0 bit 25).
+ * Pads: A28 = IIC0_SCL (FMUX 0x70) func 2 UART2_TX, A29 = IIC0_SDA (0x74) func 2 RX. */
+#define BOARD_HAS_PANEL_LINK 1
+#define BOARD_UART2_BASE    0x04160000UL
+#define BOARD_UART2_IRQ     46
+#define BOARD_UART2_IRQ_OR_0 BOARD_UART2_IRQ
+#define BOARD_UART2_CLK_HZ  25000000UL
+#define BOARD_FMUX_UART2_TX 0x70
+#define BOARD_FMUX_UART2_RX 0x74
+#define BOARD_FMUX_UART2_FN 2
 #endif

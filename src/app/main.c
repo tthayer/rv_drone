@@ -8,6 +8,8 @@
 #include "reset.h"
 #include "audio_link.h"
 #include "tone.h"
+#include "panel_link.h"
+#include "ui.h"
 #ifdef BOARD_HAS_SPI_LINK
 #include "spi.h"
 #endif
@@ -28,6 +30,23 @@ void *memcpy(void *d, const void *s, size_t n)
     while (n--)
         *p++ = *q++;
     return d;
+}
+
+int memcmp(const void *a, const void *b, size_t n)
+{
+    const unsigned char *p = a, *q = b;
+    for (; n; n--, p++, q++)
+        if (*p != *q)
+            return *p - *q;
+    return 0;
+}
+
+size_t strlen(const char *s)
+{
+    size_t n = 0;
+    while (s[n])
+        n++;
+    return n;
 }
 
 #define REG32(a) (*(volatile uint32_t *)(uintptr_t)(a))
@@ -90,6 +109,15 @@ void main(uint64_t hartid, uint64_t fdt)
     uint32_t last_frames = 0;
 #endif
 
+    if (panel_link_init() == 0) {
+        uart_puts("m6: panel link up (UART2 A28 TX / A29 RX, 1562500 8N1, irq ");
+        uart_put_dec(BOARD_UART2_IRQ_OR_0);
+        uart_puts(")\n");
+        ui_init();
+    } else {
+        uart_puts("m6: panel link unavailable\n");
+    }
+
 #ifdef M1_FAULT_TEST
     (void)*(volatile uint32_t *)0;   /* load access fault -> trap dump */
 #endif
@@ -103,6 +131,8 @@ void main(uint64_t hartid, uint64_t fdt)
         __asm__ volatile("csrsi sstatus, 2");
         audio_link_poll();
         uint64_t t = timer_ticks;
+        ui_service(t * 1000 / BOARD_TICK_HZ);
+        panel_link_poll();
         if (t / BOARD_TICK_HZ != last_sec) {
             last_sec = t / BOARD_TICK_HZ;
             led_toggle();
@@ -135,6 +165,19 @@ void main(uint64_t hartid, uint64_t fdt)
             uart_puts(" txdrop "); uart_put_dec(uart_tx_dropped);
             uart_putc('\n');
             last_frames = fr;
+            const volatile panel_link_stats_t *p = panel_link_stats();
+            uart_puts("panel: rx ok "); uart_put_dec(p->rx_ok);
+            uart_puts(" crc "); uart_put_dec(p->rx_crc_err);
+            uart_puts(" cobs "); uart_put_dec(p->rx_cobs_err);
+            uart_puts(" ovr "); uart_put_dec(p->rx_overrun);
+            uart_puts("  tx pkts "); uart_put_dec(p->tx_packets);
+            uart_puts(" drop "); uart_put_dec(p->tx_dropped);
+            uart_puts("  peer(status "); uart_put_dec(p->peer_status_count);
+            uart_puts(", rx ok "); uart_put_dec(p->peer_rx_ok);
+            uart_puts(", crc "); uart_put_dec(p->peer_crc_err);
+            uart_puts(", cobs "); uart_put_dec(p->peer_cobs_err);
+            uart_puts(", drop "); uart_put_dec(p->peer_dropped);
+            uart_puts(")\n");
             uart_puts("dma: "); uart_puts(audio_link_dma_active() ? "on" : "off");
             uart_puts(" frames "); uart_put_dec(l->dma_frames);
             uart_puts(" err "); uart_put_dec(l->dma_err);

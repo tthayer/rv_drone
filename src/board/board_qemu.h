@@ -7,4 +7,5 @@
 #define BOARD_PLIC_BASE     0x0c000000UL   /* virt PLIC; hart0 S = ctx 1 */
 #define BOARD_PLIC_SCTX     1
 #define BOARD_UART_IRQ      10
+#define BOARD_UART2_IRQ_OR_0 0
 #endif

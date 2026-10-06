@@ -1,12 +1,15 @@
 add_executable(panel
     main.c
     encoders.c
-    fb.c
-    font5x7.c
+    ${CMAKE_CURRENT_LIST_DIR}/../../common/fb.c
+    ${CMAKE_CURRENT_LIST_DIR}/../../common/font5x7.c
     midi_parser.c
     nano_link.c
     render.c
     ssd1306.c)
+
+# fb/font (shared with the Nano UI) and rvpanel.h live in the repo-level common/.
+target_include_directories(panel PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../../common)
 
 pico_generate_pio_header(panel ${CMAKE_CURRENT_LIST_DIR}/quadrature.pio)
 

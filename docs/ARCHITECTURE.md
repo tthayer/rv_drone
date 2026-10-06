@@ -249,17 +249,28 @@ Its schematic is `SCH_UnitMIDI_B04`, dated 2024-07-08.
 ### Panel link: Nano ⇄ Pico B (`common/rvpanel.h`)
 
 - **Framing:** UART 1.5625 Mbaud 8N1 (25 MHz / 16, an exact divisor on the
-  Nano). Each packet is COBS-encoded with a 0x00 delimiter and ends with a
-  CRC16. Either side may send at any time; there are no acks.
+  Nano). Packet = type u8, payload, CRC-16/CCITT-FALSE (LE) over type+payload;
+  COBS-encoded, 0x00 delimiter. Either side may send at any time; no acks.
+  Bad CRC/COBS packets are dropped and counted. Max wire size 137 B (PAGE).
 - **Nano → Pico B:**
-  - `PAGE {display u8, page u8, data[128]}`: the Nano sends only dirty
-    pages.
-  - `CONFIG {…}`: brightness, encoder acceleration, and similar settings.
+  - `PAGE 0x01 {display u8, page u8, data[128]}`: changed pages at up to
+    30 Hz, plus every page once a second (lost packets, Pico B reboot; also
+    the keepalive).
+  - `CONFIG 0x02 {contrast u8}`: all displays.
 - **Pico B → Nano:**
-  - `ENC {id u8, delta i8}`
-  - `SW {id u8, state u8}`
-  - `MIDI {len u8, bytes[3]}`: whole messages, parsed on Pico B.
-  - `STATUS {crc_errors u16, …}`
+  - `ENC 0x81 {id u8, delta i8}` (larger deltas are split)
+  - `SW 0x82 {id u8, down u8}`
+  - `MIDI 0x83 {len u8, bytes[3]}`: whole channel messages (status first),
+    parsed on Pico B; realtime/SysEx are not forwarded yet.
+  - `STATUS 0x84 {rx_ok u32, crc_err u16, cobs_err u16, dropped u16}`: once a
+    second; the Nano prints it as `peer(...)`.
+- **Ownership:** Pico B draws its local stand-in UI until the first PAGE
+  arrives, then shows only the Nano's pages. After 2.5 s without a packet
+  from the Nano it falls back to the local UI.
+- **Nano side:** `src/drivers/panel_link.c` (UART2 RX IRQ decodes and queues
+  events; TX ring drained from the 1 kHz tick and the main loop),
+  `src/app/ui.c` (state + drawing with the shared `common/fb.c`; inverted
+  `NANO n` header marks Nano-drawn screens).
 - **Budget:** about 150 KB/s. A full frame on all 3 displays is about
   3.1 KB, so the link supports about 48 full refreshes per second, far
   more than the I2C side.
@@ -326,7 +337,8 @@ firmware/            Pico SDK tree, one CMake project, two targets
   audio/             Pico A: audio_i2s.pio, rvlink slave (SPI0 + DMA, DRQ)
   panel/             Pico B: quadrature.pio, switches, ssd1306, midi, rvpanel
   common/            shared Pico code (COBS, CRC, USB CDC logging)
-common/              rvlink.h, rvpanel.h: protocols shared by all three builds
+common/              rvlink.h, rvpanel.h: protocols shared by all three builds;
+                     fb.c, font5x7.c: framebuffer drawing (Nano UI + Pico B)
 third_party/         FatFs (ChaN), OpenSBI clone (gitignored)
 emu/                 host build: engine + ui on macOS (CoreAudio, terminal/SDL OLEDs)
 ```
@@ -448,7 +460,7 @@ Behaviour:
 | M3 ✅ | Pico B: encoders, switches, 3 OLEDs, MIDI (Unit MIDI) | 6 encoders, 6 switches, 3 OLEDs (0x3C/0x3D on I2C0, 0x3C on I2C1) and MIDI in all working (2026-10-06) |
 | M4 ✅ | Nano pinmux, GPIO IRQ, SPI2 master (polled); Pico A PIO SPI slave | rvlink test pattern at 7.8 MHz: 10 min soak, 433k frames, 4 CRC errors, 0 pattern errors (2026-10-06). DMA + cache moved to M5 |
 | M5 ✅ | rvlink end to end | Nano 330 Hz sine plays via Pico A's ring: 10 min soak, 457k frames, 0 CRC errors, 0 underruns, 0 late refills (2026-10-06) |
-| M6 | Nano UART2 + rvpanel end to end | Encoders and MIDI reach the Nano; the Nano draws on all 3 OLEDs |
+| M6 ✅ | Nano UART2 + rvpanel end to end | 6 encoders, 6 switches and MIDI reach the Nano; the Nano draws all 3 OLEDs; 0 link errors in steady state (2026-10-06) |
 | M7 | Drone engine + `emu/` host build | Engine plays on the host, then on hardware via the panel and MIDI |
 | M8 | SDHCI + FatFs presets | Save and load across power cycles |
 | M9 | Perf (RVV), enclosure, single 5 V supply | CPU headroom ≥ 50 % at 4 voices |
@@ -456,7 +468,7 @@ Behaviour:
 ### Status (2026-10-06)
 
 **Done:**
-- **M0–M5:** done on hardware. The Nano renders audio and streams it over
+- **M0–M6:** done on hardware. The Nano renders audio and streams it over
   rvlink (SPI2 DMA, 7.8 MHz) into Pico A's ring and out of the PCM5102A.
   - Pico A plays a clean 440 Hz tone through the PCM5102A
     (`make pico-flash-audio`).
@@ -483,8 +495,15 @@ Behaviour:
   - Nano SPI DMA works (DW AXI DMAC, SPI2 handshakes 20/21, T-Head CMO).
     10 min soak: 450k DMA frames, 0 errors on either side, 0 DMA errors,
     and IRQs stay enabled during frames.
-- **Next: M6** — Nano UART2 + rvpanel end to end (encoders and MIDI reach
-  the Nano; the Nano draws on all 3 OLEDs).
+- **M6 ✅ (2026-10-06):** rvpanel end to end. All 6 encoders, 6 switches and
+  MIDI notes (140 of 140 messages in the capture window) reach the Nano; the
+  Nano draws all 3 OLEDs. 0 CRC/COBS errors both ways in steady state.
+  - OLED 1's 0x3D address resistor had fallen off (it answered at 0x3C and
+    mirrored OLED 0); re-soldered.
+  - Follow-ups: pull-up on the Nano's UART2 RX pad (A29): with Pico B
+    unpowered the line floats and the decoder counts noise as COBS/CRC
+    errors. MIDI realtime (clock) is not forwarded yet.
+- **Next: M7** — drone engine + `emu/` host build.
 
 **Optional:**
 - **Faster USB boot:** slim OpenSBI (generic platform with only the 8250,

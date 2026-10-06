@@ -27,3 +27,6 @@ void ssd1306_init(ssd1306_t *dev, i2c_inst_t *i2c, uint8_t addr);
 // Returns the number written. A failed write counts an error and leaves the
 // page dirty to be retried.
 unsigned ssd1306_flush(ssd1306_t *dev, fb_t *fb, unsigned max_pages);
+
+// Contrast 0..255 (command 0x81). No-op if the device is not present.
+void ssd1306_set_contrast(ssd1306_t *dev, uint8_t contrast);

@@ -14,7 +14,7 @@ BOARD_UP := $(shell echo $(BOARD) | tr a-z A-Z)
 
 CFLAGS  := -std=c11 -march=rv64gc -mabi=lp64d -mcmodel=medany -ffreestanding \
            -nostdlib -O2 -Wall -Wextra -Werror -ffunction-sections -fdata-sections \
-           -MMD -MP -DBOARD_$(BOARD_UP) -Isrc/board -Isrc/hal -Isrc/boot -Isrc/drivers -Icommon $(EXTRA_CFLAGS)
+           -MMD -MP -DBOARD_$(BOARD_UP) -Isrc/board -Isrc/hal -Isrc/boot -Isrc/drivers -Icommon -Isrc/libc $(EXTRA_CFLAGS)
 ASFLAGS := -march=rv64gc -mabi=lp64d -mcmodel=medany -DBOARD_$(BOARD_UP) -Wall -Werror
 LDFLAGS := -nostdlib -static -Wl,-T,src/boot/link.ld -Wl,-Map,$(NAME).map -Wl,--gc-sections -Wl,--no-warn-rwx-segments
 
@@ -24,12 +24,16 @@ SRCS := src/boot/start.S src/boot/trap.S src/hal/uart.c src/hal/trap.c \
 ifeq ($(BOARD),nano)
 SRCS += src/hal/pinmux.c src/hal/gpio.c src/hal/spi.c
 endif
-SRCS += src/drivers/audio_link.c
-OBJS := $(patsubst src/%,$(BUILD)/%.o,$(SRCS))
+SRCS += src/drivers/audio_link.c src/drivers/panel_link.c src/app/ui.c
+CSRCS := common/fb.c common/font5x7.c
+OBJS := $(patsubst src/%,$(BUILD)/%.o,$(SRCS)) $(patsubst common/%,$(BUILD)/common/%.o,$(CSRCS))
 
 all: $(NAME).elf $(NAME).bin $(NAME).lst
 
 $(BUILD)/%.c.o: src/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+$(BUILD)/common/%.c.o: common/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 $(BUILD)/%.S.o: src/%.S
@@ -106,8 +110,9 @@ test-panel:
 	@mkdir -p build/panel-test
 	cc -std=c11 -Wall -Wextra -Werror -Ifirmware/panel firmware/panel/test/test_midi.c firmware/panel/midi_parser.c -o build/panel-test/test_midi
 	cc -std=c11 -Wall -Wextra -Werror -Ifirmware/panel firmware/panel/test/test_debounce.c -o build/panel-test/test_debounce
-	cc -std=c11 -Wall -Wextra -Werror -Ifirmware/panel firmware/panel/test/test_render.c firmware/panel/render.c firmware/panel/fb.c firmware/panel/font5x7.c -o build/panel-test/test_render
-	build/panel-test/test_midi && build/panel-test/test_debounce && build/panel-test/test_render build/panel-test
+	cc -std=c11 -Wall -Wextra -Werror -Ifirmware/panel -Icommon firmware/panel/test/test_render.c firmware/panel/render.c common/fb.c common/font5x7.c -o build/panel-test/test_render
+	cc -std=c11 -Wall -Wextra -Werror -Icommon firmware/panel/test/test_rvpanel.c -o build/panel-test/test_rvpanel
+	build/panel-test/test_midi && build/panel-test/test_debounce && build/panel-test/test_render build/panel-test && build/panel-test/test_rvpanel
 
 # Host test for the Pico A rvlink validator (plain cc).
 test-link:

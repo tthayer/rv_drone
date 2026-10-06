@@ -79,3 +79,9 @@ unsigned ssd1306_flush(ssd1306_t *dev, fb_t *fb, unsigned max_pages) {
     }
     return done;
 }
+
+void ssd1306_set_contrast(ssd1306_t *dev, uint8_t contrast) {
+    if (!dev->present) return;
+    const uint8_t cmds[] = { 0x81, contrast };
+    if (!write_cmds(dev, cmds, sizeof cmds)) dev->errors++;
+}

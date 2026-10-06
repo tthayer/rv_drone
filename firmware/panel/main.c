@@ -1,9 +1,10 @@
 // Pico B (panel): 6 encoders (PIO quadrature), 6 switches (1 kHz debounce),
-// 3 SSD1306 OLEDs, MIDI in (UART1 RX), link stub to the Nano (UART0).
+// 3 SSD1306 OLEDs, MIDI in (UART1 RX), rvpanel link to the Nano (UART0).
 //
-// Events go to the USB CDC console. The local UI is a stand-in: each OLED
-// shows its two encoders' totals. fb_t + ssd1306_flush() are independent of
-// render.c, so in M6 pages received from the Nano replace local rendering.
+// Encoder, switch and MIDI events go to the Nano (and the USB CDC console).
+// The Nano owns the displays: its PAGE packets go straight into the
+// framebuffers. Until the first page arrives, or when the Nano has been
+// silent for NANO_TIMEOUT_MS, the local stand-in UI (render.c) is drawn.
 //
 // Core 0 only. Switches are sampled by a 1 kHz repeating timer; MIDI bytes are
 // collected by the UART1 RX interrupt so the (blocking) I2C flushes cannot
@@ -43,6 +44,7 @@
 #define REFRESH_MS      33      // ~30 Hz
 #define PAGES_PER_TICK  3       // I2C budget per display per refresh
 #define TEST_PATTERN_MS 1500
+#define NANO_TIMEOUT_MS 2500    // the Nano resends every page each second
 
 static const uint8_t sw_pin[N_ENC] = { 18, 19, 20, 8, 22, 28 };
 
@@ -132,6 +134,8 @@ static bool oled_stale[N_OLED];             // needs a re-render
 static bool oled_probe_ok[N_OLED];
 static bool bus_ack[2][2];                  // [bus][0x3C, 0x3D]
 static bool midi_was_lit;
+static bool nano_owned;                     // displays show the Nano's pages
+static uint32_t nano_pages;
 
 static void mark_all_stale(void) {
     for (unsigned d = 0; d < N_OLED; d++) oled_stale[d] = true;
@@ -158,7 +162,7 @@ static void probe_buses(void) {
 }
 
 static void print_banner(void) {
-    printf("\n== rv_drone panel (Pico B), M3 ==\n");
+    printf("\n== rv_drone panel (Pico B), M6 ==\n");
     printf("sysclk %lu Hz\n", (unsigned long)clock_get_hz(clk_sys));
     for (int b = 0; b < 2; b++) {
         printf("I2C%d:", b);
@@ -180,7 +184,8 @@ static void print_banner(void) {
     printf("encoders: 6 on PIO (pio0 SM0-3, pio1 SM0-1); switches: 1 kHz, %d ms debounce\n",
            DEBOUNCE_SAMPLES);
     printf("midi: UART1 RX GP%d, %d 8N1\n", PIN_MIDI_RX, MIDI_BAUD);
-    printf("nano link: UART0 GP16/GP17, %u baud (stub)\n", NANO_LINK_BAUD);
+    printf("nano link: UART0 GP16 TX / GP17 RX, %u baud, rvpanel; displays: %s\n",
+           NANO_LINK_BAUD, nano_owned ? "Nano" : "local");
 }
 
 static void displays_init(void) {
@@ -207,7 +212,7 @@ static void refresh_displays(uint32_t now) {
     }
     for (unsigned d = 0; d < N_OLED; d++) {
         if (!oled[d].present) continue;
-        if (oled_stale[d]) {
+        if (oled_stale[d] && !nano_owned) {
             render_display(&scratch, d, &st, now);
             fb_update(&oled_fb[d], &scratch);   // only changed pages become dirty
             oled_stale[d] = false;
@@ -244,6 +249,44 @@ static void print_midi(const midi_msg_t *m) {
     }
 }
 
+static void send_midi(const midi_msg_t *m) {
+    uint8_t b[3] = { 0, m->d1, m->d2 };
+    unsigned len = 3;
+    switch (m->type) {
+    case MIDI_NOTE_OFF: b[0] = 0x80; break;
+    case MIDI_NOTE_ON:  b[0] = 0x90; break;
+    case MIDI_CC:       b[0] = 0xB0; break;
+    case MIDI_PROGRAM_CHANGE: b[0] = 0xC0; len = 2; break;
+    case MIDI_PITCH_BEND: {
+        unsigned v = (unsigned)(m->value + 8192);
+        b[0] = 0xE0; b[1] = v & 0x7F; b[2] = (v >> 7) & 0x7F;
+        break;
+    }
+    }
+    b[0] |= m->ch & 0x0F;
+    nano_link_send_midi(b, len);
+}
+
+// ---- Nano pages ------------------------------------------------------------------
+
+static void on_page(unsigned d, unsigned page, const uint8_t *data) {
+    if (d >= N_OLED || page >= FB_PAGES) return;
+    nano_pages++;
+    if (!nano_owned) {
+        nano_owned = true;
+        printf("nano: owns the displays\n");
+    }
+    fb_set_page(&oled_fb[d], page, data);       // marks the page dirty if it changed
+}
+
+static void on_config(const uint8_t *p, unsigned len) {
+    if (len < 1) return;
+    for (unsigned d = 0; d < N_OLED; d++)
+        if (oled[d].present) ssd1306_set_contrast(&oled[d], p[0]);
+}
+
+static const nano_link_handlers_t nano_handlers = { on_page, on_config };
+
 static void poll_encoders(void) {
     static int32_t prev[N_ENC];
     static bool primed;
@@ -256,6 +299,7 @@ static void poll_encoders(void) {
         st.enc_total[i] += delta;
         st.enc_delta[i] = delta;
         oled_stale[i / 2] = true;
+        nano_link_send_enc(i, delta);
         printf("enc %u delta %ld total %ld\n", i + 1, (long)delta, (long)st.enc_total[i]);
     }
     primed = true;
@@ -267,6 +311,7 @@ static void poll_switches(void) {
         sw_tail++;
         st.sw_down[e.id] = e.down;
         oled_stale[e.id / 2] = true;
+        nano_link_send_sw(e.id, e.down);
         printf("sw %u %s\n", e.id + 1u, e.down ? "down" : "up");
     }
 }
@@ -279,6 +324,7 @@ static void poll_midi(uint32_t now) {
         if (!midi_parser_feed(&midi, b, &m)) continue;
         st.midi_last_ms = now ? now : 1;
         set_midi_text(&m);
+        send_midi(&m);
         mark_all_stale();
         print_midi(&m);
     }
@@ -317,7 +363,16 @@ int main(void) {
         poll_encoders();
         poll_switches();
         poll_midi(now);
-        nano_link_poll();
+        nano_link_poll(&nano_handlers, now);
+        if (nano_owned) {
+            nano_link_stats_t ls;
+            nano_link_get_stats(&ls);
+            if (now - ls.last_rx_ms > NANO_TIMEOUT_MS) {
+                nano_owned = false;
+                mark_all_stale();
+                printf("nano: silent for %u ms, local UI\n", NANO_TIMEOUT_MS);
+            }
+        }
 
         if (pattern && now - t_boot >= TEST_PATTERN_MS) {
             pattern = false;
@@ -334,6 +389,14 @@ int main(void) {
 
         if (now - t_stat >= 1000) {
             t_stat = now;
+            nano_link_send_status();
+            nano_link_stats_t ls;
+            nano_link_get_stats(&ls);
+            printf("nano link: %s rx %lu B ok %lu crc %lu cobs %lu drop %lu pages %lu tx %lu\n",
+                   nano_owned ? "nano" : "local", (unsigned long)ls.rx_bytes,
+                   (unsigned long)ls.rx_ok, (unsigned long)ls.crc_err,
+                   (unsigned long)ls.cobs_err, (unsigned long)ls.rx_dropped,
+                   (unsigned long)nano_pages, (unsigned long)ls.tx_packets);
             uint32_t drops = sw_dropped + midi_overruns;
             if (midi.clock_count != last_clock || midi.rt_other != last_rt) {
                 printf("midi realtime: clock %lu (+%lu) other %lu\n",
