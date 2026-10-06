@@ -1,0 +1,55 @@
+; I2S output, 32-bit slots, 2 PIO cycles per bit (64 fs).
+; Adapted from pico-extras audio_i2s (16-bit, "set x, 14") to 32-bit slots.
+;
+; Pins: side-set base = BCK, base+1 = LRCK; OUT pin = DIN.
+; Side-set value: bit1 = LRCK, bit0 = BCK.
+; PIO clock = 48000 * 64 * 2 = 6.144 MHz.
+; Data changes while BCK is low; the MSB follows the LRCK edge by one BCK (I2S).
+; The last bit of a word is output on the cycle LRCK changes.
+
+.program audio_i2s
+.side_set 2
+
+                        ;        /--- LRCK
+                        ;        |/-- BCK
+bitloop1:               ;        ||
+    out pins, 1       side 0b10
+    jmp x-- bitloop1  side 0b11
+    out pins, 1       side 0b00
+    set x, 30         side 0b01
+
+bitloop0:
+    out pins, 1       side 0b00
+    jmp x-- bitloop0  side 0b01
+    out pins, 1       side 0b10
+public entry_point:
+    set x, 30         side 0b11
+
+% c-sdk {
+#include "hardware/clocks.h"
+
+// bck_pin = BCK, bck_pin+1 = LRCK (side-set), data_pin = DIN.
+// The caller supplies an integral clkdiv.
+static inline void audio_i2s_program_init(PIO pio, uint sm, uint offset,
+                                          uint data_pin, uint bck_pin,
+                                          uint clkdiv_int) {
+    pio_gpio_init(pio, data_pin);
+    pio_gpio_init(pio, bck_pin);
+    pio_gpio_init(pio, bck_pin + 1);
+
+    pio_sm_config c = audio_i2s_program_get_default_config(offset);
+    sm_config_set_out_pins(&c, data_pin, 1);
+    sm_config_set_sideset_pins(&c, bck_pin);
+    sm_config_set_out_shift(&c, false, true, 32);   // MSB first, autopull 32
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
+    sm_config_set_clkdiv_int_frac(&c, clkdiv_int, 0);
+
+    pio_sm_init(pio, sm, offset + audio_i2s_offset_entry_point, &c);
+
+    uint32_t pin_mask = (3u << bck_pin) | (1u << data_pin);
+    pio_sm_set_pindirs_with_mask(pio, sm, pin_mask, pin_mask);
+    pio_sm_set_pins_with_mask(pio, sm, 0, pin_mask);
+    pio_sm_clear_fifos(pio, sm);
+    pio_sm_restart(pio, sm);
+}
+%}

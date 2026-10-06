@@ -69,7 +69,22 @@ usbboot: fip
 	$(if $(RESET_PORT),stty -f $(RESET_PORT) 115200 raw -echo clocal && printf '\022' > $(RESET_PORT))
 	$(PYTHON) tools/usbboot.py build/nano/fip.bin --magic $(USB_DL_MAGIC)
 
+# Pico firmware (Pico A audio now, Pico B panel later). Needs:
+#   tools/get-pico-sdk.sh, arm-none-eabi-gcc with newlib, ninja, cmake, picotool.
+# PICO_TOOLCHAIN_PATH is a bin dir; defaults to a user-local Arm GNU toolchain
+# (~/opt/arm-gnu-toolchain-*) if one is installed, else PATH is used.
+PICO_SDK_PATH ?= $(CURDIR)/third_party/pico-sdk
+PICO_TOOLCHAIN_PATH ?= $(lastword $(wildcard $(HOME)/opt/arm-gnu-toolchain-*/bin))
+pico:
+	cmake -S firmware -B build/firmware -G Ninja -DPICO_SDK_PATH=$(PICO_SDK_PATH) \
+	      $(if $(PICO_TOOLCHAIN_PATH),-DPICO_TOOLCHAIN_PATH=$(PICO_TOOLCHAIN_PATH))
+	ninja -C build/firmware
+
+# Reboots a running Pico A (picotool reset interface) and loads the UF2.
+pico-flash-audio: pico
+	picotool load -fx build/firmware/audio/audio.uf2
+
 clean:
 	rm -rf build
 
-.PHONY: all run-qemu opensbi fip usbboot clean
+.PHONY: all run-qemu opensbi fip usbboot pico pico-flash-audio clean

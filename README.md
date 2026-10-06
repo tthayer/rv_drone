@@ -12,15 +12,57 @@ The design, pin maps, link protocols and milestones are in
 `docs/ARCHITECTURE.md`.
 
 **Current state:** M1 is done. The Nano boots from SD and runs a 1 kHz timer
-interrupt and an interrupt-driven UART0, and `make usbboot` boots it over USB. The Pico firmware (`firmware/`) is not
-started yet.
+interrupt and an interrupt-driven UART0, and `make usbboot` boots it over USB. The Pico firmware is in `firmware/`; M2 (Pico A audio) is written but not yet verified on hardware.
 
 ## Toolchain
 
     brew install riscv64-elf-gcc qemu dtc
 
-The Pico SDK toolchain (arm-none-eabi-gcc, cmake, picotool) gets added at
-M2.
+See "Pico firmware" below for the Pico toolchain.
+
+## Pico firmware
+
+Toolchain (needs arm-none-eabi-gcc **with newlib**):
+
+    brew install cmake ninja picotool
+    brew install --cask gcc-arm-embedded      # needs sudo for the pkg installer
+
+The Homebrew `arm-none-eabi-gcc` formula has no newlib. If you can't use the
+cask, expand the Arm GNU Toolchain pkg into `~/opt/arm-gnu-toolchain-*`
+(`pkgutil --expand-full <pkg> dir`, move `dir/Payload` there); `make pico`
+picks that up through `PICO_TOOLCHAIN_PATH` (a bin dir; override as needed).
+
+Get the SDK (pinned 2.3.1, with submodules, into `third_party/pico-sdk`):
+
+    tools/get-pico-sdk.sh
+
+Build (`make pico` runs the cmake and ninja steps; output in `build/firmware/`):
+
+    make pico           # -> build/firmware/audio/audio.{elf,uf2}
+
+Flash Pico A: either `make pico-flash-audio` (runs
+`picotool load -fx build/firmware/audio/audio.uf2`; it reboots a running Pico
+into BOOTSEL through the USB reset interface), or hold BOOTSEL while plugging
+it in and copy `audio.uf2` to the RPI-RP2 drive. The console is USB CDC: it
+prints the sysclk (153.6 MHz), the PIO divider (25) and, once a second, the DMA
+block count (expect 750/s) and the late-refill count.
+
+PCM5102A wiring for M2 (Pico A):
+
+| Pico A | PCM5102A |
+|---|---|
+| GP10 (pin 14) | BCK |
+| GP11 (pin 15) | LCK / LRCK |
+| GP12 (pin 16) | DIN |
+| 3V3(OUT) (pin 36) | VIN |
+| GND | GND |
+
+Check your module, as boards differ. On the common purple modules:
+
+- SCK must be tied to GND (no MCLK is supplied); often a solder bridge.
+- FMT low = I2S.
+- XSMT high = unmuted; often a solder bridge or jumper to 3.3 V.
+- FLT low and DEMP low.
 
 ## Build (Nano)
 
