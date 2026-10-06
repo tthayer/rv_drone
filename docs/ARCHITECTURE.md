@@ -426,7 +426,7 @@ Behaviour:
 | M1 ✅ | Nano UART0 via FTDI; traps, PLIC, SBI timer IRQ | Boot log captured; 1 kHz tick, `time` +25,000,000/s; UART RX IRQ echo (2026-10-05) |
 | M2 ✅ | Pico SDK tree; Pico A PIO I2S at 153.6 MHz sysclk | Clean 440 Hz sine from the PCM5102A; 10 min soak, 0 late refills, 750±1 blocks/s (2026-10-06) |
 | M3 ✅ | Pico B: encoders, switches, 3 OLEDs, MIDI (Unit MIDI) | 6 encoders, 6 switches, 3 OLEDs (0x3C/0x3D on I2C0, 0x3C on I2C1) and MIDI in all working (2026-10-06) |
-| M4 | Nano pinmux, GPIO IRQ, SPI2 master + DMA, cache handling | Logic-analyser check of SPI2 mode 3 at 8 MHz |
+| M4 ✅ | Nano pinmux, GPIO IRQ, SPI2 master (polled); Pico A PIO SPI slave | rvlink test pattern at 7.8 MHz: 10 min soak, 433k frames, 4 CRC errors, 0 pattern errors (2026-10-06). DMA + cache moved to M5 |
 | M5 | rvlink end to end | The Nano's sine plays via Pico A; 0 CRC errors and 0 underruns over 10 min |
 | M6 | Nano UART2 + rvpanel end to end | Encoders and MIDI reach the Nano; the Nano draws on all 3 OLEDs |
 | M7 | Drone engine + `emu/` host build | Engine plays on the host, then on hardware via the panel and MIDI |
@@ -436,7 +436,7 @@ Behaviour:
 ### Status (2026-10-06)
 
 **Done:**
-- **M0–M3:** done on hardware.
+- **M0–M4:** done on hardware. The Nano⇄Pico A SPI link carries test frames at 7.8 MHz.
   - Pico A plays a clean 440 Hz tone through the PCM5102A
     (`make pico-flash-audio`).
   - Pico B reads 6 encoders, 6 switches and MIDI, and drives 3 OLEDs
@@ -448,7 +448,13 @@ Behaviour:
   per-second PLIC counters). Trim them once M4 is stable.
 
 **Next:**
-- **M4:** Nano SPI2 on P18/P21/P22/P23. Measure P22 for 3.3 V first.
+- **M5:** real audio over rvlink. Before or alongside it:
+  - **Non-blocking Nano console.** The ~17 ms/s blocking 115200 stats
+    print causes ~11 missed DRQ/s (seq gaps).
+  - **Explain the ~22 short frames/s** Pico A still counts. It may be a
+    re-arm race after a late DRQ.
+  - **Nano SPI DMA.** The polled frame masks IRQs for 0.55 ms of every
+    1.33 ms.
 
 **Optional:**
 - **Faster USB boot:** slim OpenSBI (generic platform with only the 8250,
