@@ -7,6 +7,9 @@
 #define UART_LSR 5   /* line status */
 #define UART_RBR 0   /* receive buffer */
 #define UART_IER 1   /* interrupt enable */
+#define UART_IIR 2   /* interrupt identity (read) */
+#define UART_USR 31  /* DW: UART status; reading clears busy-detect */
+#define IIR_BUSY 0x7
 #define IER_ERBFI 0x01
 #define LSR_DR   0x01
 #define LSR_THRE 0x20
@@ -54,8 +57,17 @@ void uart_put_dec(uint64_t v)
         uart_putc(buf[--n]);
 }
 
+uint32_t uart_isr_count, uart_busy_count;
+
 static void uart_rx_isr(void)
 {
+    uart_isr_count++;
+#ifdef BOARD_UART_DW
+    if ((*reg(UART_IIR) & 0xf) == IIR_BUSY) {   /* DW busy-detect: clear via USR */
+        (void)*reg(UART_USR);
+        uart_busy_count++;
+    }
+#endif
     while (*reg(UART_LSR) & LSR_DR) {
         uint8_t c = *reg(UART_RBR);
         uint32_t h = rx_head;
@@ -68,6 +80,12 @@ static void uart_rx_isr(void)
 
 void uart_enable_rx_irq(void)
 {
+#ifdef BOARD_UART_DW
+    (void)*reg(UART_USR);                       /* clear stale busy-detect */
+#endif
+    (void)*reg(UART_IIR);
+    while (*reg(UART_LSR) & LSR_DR)
+        (void)*reg(UART_RBR);
     plic_register(BOARD_UART_IRQ, uart_rx_isr);
     *reg(UART_IER) |= IER_ERBFI;
 }
@@ -80,4 +98,14 @@ int uart_getc_nonblock(void)
     int c = rx_buf[t % RX_N];
     rx_tail = t + 1;
     return c;
+}
+
+void uart_dump_regs(void)
+{
+    uart_puts(" ier=");  uart_put_hex(*reg(UART_IER));
+    uart_puts(" iir=");  uart_put_hex(*reg(UART_IIR));
+    uart_puts(" lsr=");  uart_put_hex(*reg(UART_LSR));
+#ifdef BOARD_UART_DW
+    uart_puts(" usr=");  uart_put_hex(*reg(UART_USR));
+#endif
 }

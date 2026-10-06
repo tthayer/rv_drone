@@ -8,4 +8,5 @@ void plic_init(void);                           /* S-ctx of hart 0: thr=0, all o
 void plic_register(unsigned irq, plic_fn fn);   /* set handler, priority 1, enable */
 void plic_dispatch(void);                       /* claim/call/complete until empty */
 
+extern uint32_t plic_claims, plic_spurious, plic_last_irq;
 #endif

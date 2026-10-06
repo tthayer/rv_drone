@@ -3,6 +3,7 @@
  * S-mode access-control bit, we do not touch it. */
 #include "plic.h"
 #include "board.h"
+#include "uart.h"
 
 #define MAX_IRQ 128
 #define PRIO(i)  (BOARD_PLIC_BASE + 4u * (i))
@@ -13,6 +14,7 @@
 #define R32(a) (*(volatile uint32_t *)(uintptr_t)(a))
 
 static plic_fn handlers[MAX_IRQ];
+uint32_t plic_claims, plic_spurious, plic_last_irq;
 
 void plic_init(void)
 {
@@ -33,9 +35,21 @@ void plic_register(unsigned irq, plic_fn fn)
 void plic_dispatch(void)
 {
     uint32_t irq;
-    while ((irq = R32(CLAIM)) != 0) {
+    if ((irq = R32(CLAIM)) == 0) {
+        if ((++plic_spurious & 0xfffff) == 0)
+            uart_puts("plic: spurious SEI storm\n");
+        return;
+    }
+    do {
+        plic_last_irq = irq;
+        if ((++plic_claims & 0xfffff) == 0) {
+            uart_puts("plic: storm irq=");
+            uart_put_dec(irq);
+            uart_dump_regs();
+            uart_putc('\n');
+        }
         if (irq < MAX_IRQ && handlers[irq])
             handlers[irq]();
         R32(CLAIM) = irq;
-    }
+    } while ((irq = R32(CLAIM)) != 0);
 }

@@ -51,11 +51,20 @@ void main(uint64_t hartid, uint64_t fdt)
     uart_puts(")\n");
 
     trap_init();
+    uart_puts("m1: trap ok\n");
     plic_init();
+    uart_puts("m1: plic ok\n");
     uart_enable_rx_irq();
+    uart_puts("m1: uart irq ok");
+    uart_dump_regs();
+    uart_putc('\n');
     timer_init();
+    uart_puts("m1: timer armed, sip=");
+    { uint64_t v; __asm__ volatile("csrr %0, sip" : "=r"(v)); uart_put_hex(v); }
+    uart_putc('\n');
     __asm__ volatile("csrs sie, %0" :: "r"((1u << 5) | (1u << 9)));  /* STIE|SEIE */
     __asm__ volatile("csrsi sstatus, 2");                            /* SIE */
+    uart_puts("m1: irqs on\n");
 
 #ifdef M1_FAULT_TEST
     (void)*(volatile uint32_t *)0;   /* load access fault -> trap dump */
@@ -72,6 +81,12 @@ void main(uint64_t hartid, uint64_t fdt)
             uart_put_dec(t);
             uart_puts(" time ");
             uart_put_dec(rdtime());
+            uart_puts(" claims ");
+            uart_put_dec(plic_claims);
+            uart_puts(" spur ");
+            uart_put_dec(plic_spurious);
+            uart_puts(" busy ");
+            uart_put_dec(uart_busy_count);
             uart_putc('\n');
         }
         int c;

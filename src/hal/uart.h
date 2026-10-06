@@ -10,4 +10,6 @@ void uart_put_dec(uint64_t v);
 void uart_enable_rx_irq(void);   /* IER.ERBFI + PLIC registration */
 int uart_getc_nonblock(void);    /* -1 if empty */
 
+extern uint32_t uart_isr_count, uart_busy_count;
+void uart_dump_regs(void);
 #endif
