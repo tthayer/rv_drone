@@ -1,4 +1,7 @@
-add_executable(audio main.c)
+add_executable(audio main.c link_validate.c link_spi.c)
+
+# rvlink.h lives in the repo-level common/ dir (shared with the Nano image).
+target_include_directories(audio PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../../common)
 
 pico_generate_pio_header(audio ${CMAKE_CURRENT_LIST_DIR}/audio_i2s.pio)
 
@@ -10,6 +13,9 @@ target_link_libraries(audio PRIVATE
     hardware_clocks
     hardware_vreg
     hardware_irq
+    hardware_spi
+    hardware_gpio
+    hardware_resets
     rv_common)
 
 # USB CDC console (also keeps the picotool reset interface), no UART.

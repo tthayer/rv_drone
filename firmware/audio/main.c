@@ -19,6 +19,7 @@
 
 #include "audio_i2s.pio.h"
 #include "rv_audio.h"
+#include "link_spi.h"
 
 #define PIN_BCK   10    // LRCK is GP11 (side-set), see audio_i2s.pio
 #define PIN_DIN   12
@@ -73,6 +74,7 @@ static void __isr dma_irq_handler(void) {
         dma_channel_set_read_addr(dma_ch[i], blocks[i], false);
         fill_block(blocks[i], RV_BLOCK_FRAMES);
         block_count++;
+        link_spi_on_block();
     }
 }
 
@@ -129,12 +131,14 @@ int main(void) {
     irq_set_exclusive_handler(DMA_IRQ_0, dma_irq_handler);
     irq_set_enabled(DMA_IRQ_0, true);
 
+    link_spi_init(&late_count);             // armed before the first DRQ
+
     dma_channel_start(dma_ch[0]);           // block 0, then chain to 1, 0, ...
     pio_sm_set_enabled(pio, sm, true);
     printf("I2S running: %u Hz tone, BCK GP%d LRCK GP%d DIN GP%d\n",
            TONE_HZ, PIN_BCK, PIN_BCK + 1, PIN_DIN);
 
-    uint32_t last_blocks = 0;
+    uint32_t last_blocks = 0, last_ok = 0;
     for (;;) {
         sleep_ms(1000);
         uint32_t b = block_count;
@@ -142,5 +146,12 @@ int main(void) {
                (unsigned long)(b - last_blocks), RV_BLOCKS_PER_SEC,
                (unsigned long)late_count);
         last_blocks = b;
+        link_stats_t ls;
+        link_spi_get_stats(&ls);
+        printf("link: ok %lu/s crc %lu magic %lu pattern %lu short %lu gaps %lu\n",
+               (unsigned long)(ls.frames_ok - last_ok), (unsigned long)ls.crc_err,
+               (unsigned long)ls.magic_err, (unsigned long)ls.pattern_err,
+               (unsigned long)ls.short_err, (unsigned long)ls.seq_gaps);
+        last_ok = ls.frames_ok;
     }
 }

@@ -14,12 +14,16 @@ BOARD_UP := $(shell echo $(BOARD) | tr a-z A-Z)
 
 CFLAGS  := -std=c11 -march=rv64gc -mabi=lp64d -mcmodel=medany -ffreestanding \
            -nostdlib -O2 -Wall -Wextra -Werror -ffunction-sections -fdata-sections \
-           -DBOARD_$(BOARD_UP) -Isrc/board -Isrc/hal -Isrc/boot $(EXTRA_CFLAGS)
+           -DBOARD_$(BOARD_UP) -Isrc/board -Isrc/hal -Isrc/boot -Isrc/drivers -Icommon $(EXTRA_CFLAGS)
 ASFLAGS := -march=rv64gc -mabi=lp64d -mcmodel=medany -DBOARD_$(BOARD_UP) -Wall -Werror
 LDFLAGS := -nostdlib -static -Wl,-T,src/boot/link.ld -Wl,-Map,$(NAME).map -Wl,--gc-sections -Wl,--no-warn-rwx-segments
 
 SRCS := src/boot/start.S src/boot/trap.S src/hal/uart.c src/hal/trap.c \
        src/hal/timer.c src/hal/plic.c src/hal/reset.c src/app/main.c
+ifeq ($(BOARD),nano)
+SRCS += src/hal/pinmux.c src/hal/gpio.c src/hal/spi.c
+endif
+SRCS += src/drivers/audio_link.c
 OBJS := $(patsubst src/%,$(BUILD)/%.o,$(SRCS))
 
 all: $(NAME).elf $(NAME).bin $(NAME).lst
@@ -98,7 +102,13 @@ test-panel:
 	cc -std=c11 -Wall -Wextra -Werror -Ifirmware/panel firmware/panel/test/test_render.c firmware/panel/render.c firmware/panel/fb.c firmware/panel/font5x7.c -o build/panel-test/test_render
 	build/panel-test/test_midi && build/panel-test/test_debounce && build/panel-test/test_render build/panel-test
 
+# Host test for the Pico A rvlink validator (plain cc).
+test-link:
+	@mkdir -p build/link-test
+	cc -std=c11 -Wall -Wextra -Werror -Icommon -Ifirmware/audio firmware/audio/test/test_link.c firmware/audio/link_validate.c -o build/link-test/test_link
+	build/link-test/test_link
+
 clean:
 	rm -rf build
 
-.PHONY: all run-qemu opensbi fip usbboot pico pico-flash-audio pico-flash-panel test-panel clean
+.PHONY: all run-qemu opensbi fip usbboot pico pico-flash-audio pico-flash-panel test-panel test-link clean

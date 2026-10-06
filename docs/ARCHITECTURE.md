@@ -94,6 +94,23 @@ leaving a/b (left) and j (right) free. Every header GPIO is 3.3 V.
   - UART2 is `snps,dw-apb-uart` at 0x04160000, with a 25 MHz clock and
     reg-shift 2.
   - Both come from the SDK `cv181x_base.dtsi`.
+  - **SPI2 clock (M4 research):** `clk_spi` = FPLL 1500 MHz / 8 = **187.5 MHz**
+    (TRM `clock/clksource_preset_freq_div_param.table.rst:272`, `spi.rst`
+    "Clock"; FSBL `fsbl/plat/cv181x/platform.c:223`). SCK = 187.5 MHz / BAUDR
+    (even), so 8 MHz is not exact: BAUDR 24 gives 7.8125 MHz.
+  - **Gate and reset bits:** clk_apb_spi2 = CLKGEN (0x03002000) `CLK_EN_1`
+    (+0x04) bit 11; clk_spi = `CLK_EN_3` (+0x0C) bit 6 (`clk-cv181x.c:749-757,
+    1280-1288`); both reset to 1. Clock bypass-to-xtal is `CLK_BYP_0` (+0x30)
+    bit 30; the FSBL clears it (`platform.c:254-258`). Divider reg +0x100: bit 3
+    = use reg factor, else 8. SPI2 soft reset = `SOFT_RSTN_1` (0x03003004) bit
+    10, active low (TRM `reset_registers_describe.table.rst:132`).
+  - **DW SSI layout:** compatible `snps,dw-apb-ssi` (not DWC_ssi), so CTRLR0 is
+    DFS[3:0], FRF[5:4], SCPH[6], SCPOL[7], TMOD[9:8] (SDK `spi-dw-core.c:270-322`,
+    `spi-dw.h:43-60`). Mode 3 8-bit TR = 0xC7. BAUDR must be even.
+  - **GPIO0 IRQ:** TRM C906 map has GPIO0 = A53 76 - 16 = PLIC 60 (same offset as
+    UART0, verified 44). Still unverified on hardware.
+  - **No SD1 pad-power enable found** in the SDK or TRM; VDDIO_SD1 is a board
+    supply (measure P22).
 - **No SPI on A22–A25.** Those pads are the eMMC pads, and their only SPI
   functions are SPINOR/SPINAND, the flash controllers. The only SPI
   exposed on the header is SPI2, on the P pads.
@@ -472,8 +489,8 @@ Synthesis is `float` on the Nano. RVV 0.7.1 is a later optimisation.
 
 ### Unverified (from research; confirm on hardware)
 
-- The SPI2 input clock rate (`CV181X_CLK_SPI`), and that it streams back to
-  back in mode 3. M4 checks this.
+- That SPI2 really runs at 187.5 MHz as decoded, that a 528 B frame streams
+  back to back in mode 3, and GPIO0's PLIC source (60). M4 checks these.
 - That SD is SDHCI.
 - **Little core:** since 2026-10-05 the fip carries `build/park.bin`
   instead of the vendor `cvirtos.bin`. The FSBL still releases the C906L,
