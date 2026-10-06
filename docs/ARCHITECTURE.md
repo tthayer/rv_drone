@@ -380,32 +380,43 @@ Synthesis is `float` on the Nano. RVV 0.7.1 is a later optimisation.
   - CCs are mapped to the same parameter IDs the encoders drive.
   - Clock sync of the LFOs comes later.
 - **UI:** three displays, each split down the middle, so each encoder
-  owns one 64-pixel-wide half:
-
-  ```
-  OLED 0 (I2C0, 0x3C)     OLED 1 (I2C0, 0x3D)     OLED 2 (I2C1, 0x3C)
-  ┌──────────┬──────────┐ ┌──────────┬──────────┐ ┌──────────┬──────────┐
-  │ OSC  1/4 │          │ │ FILTER   │          │ │ SPACE    │          │  ← 8 px header: page name
-  │ DETUNE   │ DRIFT    │ │ CUTOFF   │ RESO     │ │ DELAY    │ REVERB   │  ← param name (6x8 font)
-  │   12.5c  │   0.30   │ │  1.2 kHz │   0.65   │ │  850 ms  │   72 %   │  ← value (large font)
-  │ ◜────◝   │ ◜──◝     │ │ ◜─────◝  │ ◜───◝    │ │ ◜──◝     │ ◜─────◝  │  ← arc/bar of position
-  └──────────┴──────────┘ └──────────┴──────────┘ └──────────┴──────────┘
-     Enc 1      Enc 2        Enc 3      Enc 4        Enc 5      Enc 6
-  ```
-
-  - **Pages:** each page maps up to 6 parameters onto the six encoders.
-  - **Encoder switches:**
-    - Enc 1 push cycles the page.
-    - Other pushes are per page: fine adjust, reset to default, or
-      latch/hold.
-  - **Feedback:**
-    - A half briefly inverts or brightens when its encoder moves.
-    - The header row carries global state: MIDI activity, CPU load, page
-      x/N.
-    - A scope or spectrum view can take over one display temporarily, e.g.
-      while a switch is held.
+  owns one 64-pixel-wide half. See "UI layout" below.
 - **Presets:** stored as flat binary/INI files in `/presets` on the same FAT
   partition as `fip.bin`.
+
+### UI layout
+
+```
+ OLED 0 (I2C0 0x3C)      OLED 1 (I2C0 0x3D)      OLED 2 (I2C1 0x3C)
++----------+----------+ +----------+----------+ +----------+----------+
+| OSC  1/4 |          | | FILTER   |          | | SPACE    |          |  a
+| DETUNE   | DRIFT    | | CUTOFF   | RESO     | | DELAY    | REVERB   |  b
+|   12.5c  |   0.30   | |  1.2 kHz |   0.65   | |  850 ms  |   72 %   |  c
+| [####  ] | [##    ] | | [#####  ] | [###  ] | | [##    ] | [##### ] |  d
++----------+----------+ +----------+----------+ +----------+----------+
+   Enc 1      Enc 2        Enc 3      Enc 4        Enc 5      Enc 6
+```
+
+Rows:
+
+- **a:** 8 px header, holding the page name and page x/N.
+- **b:** parameter name, 6x8 font.
+- **c:** value, large font.
+- **d:** bar or arc showing the knob position.
+
+Behaviour:
+
+- **Pages:** each page maps up to 6 parameters onto the six encoders.
+- **Encoder switches:**
+  - Enc 1 push cycles the page.
+  - Other pushes are per page: fine adjust, reset to default, or
+    latch/hold.
+- **Feedback:**
+  - A half briefly inverts or brightens when its encoder moves.
+  - The header row carries global state: MIDI activity, CPU load, page
+    x/N.
+  - A scope or spectrum view can take over one display temporarily, e.g.
+    while a switch is held.
 
 ## Milestones
 
