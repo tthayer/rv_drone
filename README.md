@@ -11,8 +11,8 @@ A bare-metal drone synthesizer on three boards:
 The design, pin maps, link protocols and milestones are in
 `docs/ARCHITECTURE.md`.
 
-**Current state:** M0 is done. The Nano boots from SD and blinks LED1, with
-a UART0 hello and heartbeat. The Pico firmware (`firmware/`) is not
+**Current state:** M1 is done. The Nano boots from SD and runs a 1 kHz timer
+interrupt and an interrupt-driven UART0. The Pico firmware (`firmware/`) is not
 started yet.
 
 ## Toolchain

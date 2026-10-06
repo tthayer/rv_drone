@@ -394,7 +394,7 @@ Synthesis is `float` on the Nano. RVV 0.7.1 is a later optimisation.
 | # | Goal | Done when |
 |---|---|---|
 | M0 ✅ | Nano toolchain, linker, `start.S`, fip packaging, LED | LED1 toggles from an SD boot (2026-10-01) |
-| M1 | Nano UART0 via FTDI; traps, PLIC, SBI timer IRQ | Boot log captured; 1 kHz tick count printed each second |
+| M1 ✅ | Nano UART0 via FTDI; traps, PLIC, SBI timer IRQ | Boot log captured; 1 kHz tick, `time` +25,000,000/s; UART RX IRQ echo (2026-10-05) |
 | M2 | Pico SDK tree; Pico A PIO I2S at 153.6 MHz sysclk | Clean 440 Hz sine from the PCM5102A, no clicks over 10 min |
 | M3 | Pico B: encoders, switches, 3 OLEDs, MIDI (Unit MIDI) | Events printed over USB CDC; a test pattern on all 3 OLEDs |
 | M4 | Nano pinmux, GPIO IRQ, SPI2 master + DMA, cache handling | Logic-analyser check of SPI2 mode 3 at 8 MHz |
@@ -430,11 +430,26 @@ Synthesis is `float` on the Nano. RVV 0.7.1 is a later optimisation.
 - The card that worked was a 32 GB SDHC with MBR and a single FAT32
   partition at a 4 MiB offset, holding `fip.bin` in its root.
 
+### Verified on hardware (2026-10-05, M1)
+
+- **UART0:** 0x04140000, DW 16550 with reg-shift 2, at 115200. The PLIC
+  source is **44**.
+- **PLIC:** 0x70000000, with the hart 0 S-mode context = 1. OpenSBI
+  grants S-mode R/W on 0x70000000–0x73ffffff.
+- **Timebase:** exactly 25 MHz. The OpenSBI banner shows
+  `aclint-mtimer @ 25000000Hz`, and `time` advances 25,000,000 per 1000
+  ticks.
+- **SBI v3.0 extensions:** TIME, IPI, HSM, PMU, DBCN, FWFT, SSE.
+- **DW UART busy-detect:** at handoff, an external interrupt is already
+  pending (`sip=0x220`). Unless USR is read before the UART IRQ is
+  enabled, it storms and main never runs. `uart_enable_rx_irq()` reads
+  USR and IIR and drains RBR first, and the ISR also clears busy-detect.
+- **Boot log:** the FSBL prints DDR3 at 1866 MT/s and BIST PASS, then the
+  vendor `cvirtos` starts on the C906L ("RT: … CVIRTOS"). After that,
+  "Jump to monitor at 0x80000000" and OpenSBI v1.8.1 run.
+
 ### Unverified (from research; confirm on hardware)
 
-- PLIC at 0x70000000 and CLINT at 0x74000000 (from the DTS).
-- That UART0 is DW 16550-compatible with a 4-byte stride, and the 25 MHz
-  timebase. M1 checks both.
 - The SPI2 input clock rate (`CV181X_CLK_SPI`), and that it streams back to
   back in mode 3. M4 checks this.
 - That SD is SDHCI.
