@@ -287,16 +287,20 @@ static void poll_midi(uint32_t now) {
 int main(void) {
     stdio_init_all();
 
+    // Give a terminal a moment to attach so boot output is not lost.
+    for (int i = 0; i < 30 && !stdio_usb_connected(); i++) sleep_ms(100);
+    printf("panel: boot\n");
     switches_init();
+    printf("panel: switches ok\n");
     encoders_init();
+    printf("panel: encoders ok\n");
     midi_parser_init(&midi);
     midi_init();
     nano_link_init();
     i2c_buses_init();
-
-    // Give a terminal a moment to attach so the banner is not lost.
-    for (int i = 0; i < 30 && !stdio_usb_connected(); i++) sleep_ms(100);
+    printf("panel: uarts+i2c ok\n");
     displays_init();
+    printf("panel: displays ok\n");
     print_banner();
 
     mark_all_stale();

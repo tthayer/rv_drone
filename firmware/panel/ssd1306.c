@@ -29,8 +29,10 @@ static const uint8_t init_seq[] = {
 };
 
 bool ssd1306_probe(i2c_inst_t *i2c, uint8_t addr) {
-    uint8_t dummy = 0;
-    return i2c_write_timeout_us(i2c, addr, &dummy, 0, false, I2C_TIMEOUT_US) == 0;
+    // The RP2xxx I2C block can't do a zero-length write (it reports an ACK
+    // for any address), so probe with a 1-byte read, as pico-examples' bus_scan does.
+    uint8_t dummy;
+    return i2c_read_timeout_us(i2c, addr, &dummy, 1, false, I2C_TIMEOUT_US) == 1;
 }
 
 static bool write_cmds(ssd1306_t *dev, const uint8_t *cmds, size_t n) {

@@ -7,6 +7,9 @@
 
 // A pin of each pair; B is the next GPIO.
 static const uint8_t enc_pin[ENC_COUNT] = { 0, 2, 6, 10, 12, 14 };
+// Clockwise = positive. The KY-040 modules (enc 1-5) put CLK/DT the other way
+// round from the bare encoder on enc 6.
+static const bool enc_invert[ENC_COUNT] = { true, true, true, true, true, false };
 
 static PIO enc_pio[ENC_COUNT];
 static uint enc_sm[ENC_COUNT];
@@ -28,15 +31,15 @@ void encoders_init(void) {
     for (unsigned i = 0; i < ENC_COUNT; i++) last[i] = encoder_read(i);
 }
 
-// The SM pushes its position every pass but drops pushes while the FIFO is
-// full, so what is queued can be stale. Drain it, then take the first entry
-// pushed after the drain (as pico-examples' quadrature_encoder does), with a
-// bounded wait in case the SM is not running.
+// The SM pushes its position every pass (dropping pushes while the FIFO is
+// full), so queued entries can be stale. As in pico-examples'
+// quadrature_encoder: read exactly level + 1 entries. The last one was pushed
+// after this call started. Never drain "until empty": the SM refills faster
+// than the CPU reads, so that loop can spin forever.
 int32_t encoder_read(unsigned i) {
     PIO pio = enc_pio[i];
     uint sm = enc_sm[i];
-    while (!pio_sm_is_rx_fifo_empty(pio, sm)) last[i] = (int32_t)pio_sm_get(pio, sm);
-    for (int spin = 0; spin < 2000 && pio_sm_is_rx_fifo_empty(pio, sm); spin++) {}
-    if (!pio_sm_is_rx_fifo_empty(pio, sm)) last[i] = (int32_t)pio_sm_get(pio, sm);
-    return last[i];
+    for (uint n = pio_sm_get_rx_fifo_level(pio, sm) + 1; n > 0; n--)
+        last[i] = (int32_t)pio_sm_get_blocking(pio, sm);
+    return enc_invert[i] ? -last[i] : last[i];
 }
