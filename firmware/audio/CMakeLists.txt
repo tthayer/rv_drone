@@ -4,6 +4,7 @@ add_executable(audio main.c link_validate.c link_spi.c)
 target_include_directories(audio PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../../common)
 
 pico_generate_pio_header(audio ${CMAKE_CURRENT_LIST_DIR}/audio_i2s.pio)
+pico_generate_pio_header(audio ${CMAKE_CURRENT_LIST_DIR}/spi_slave.pio)
 
 target_link_libraries(audio PRIVATE
     pico_stdlib
@@ -13,7 +14,6 @@ target_link_libraries(audio PRIVATE
     hardware_clocks
     hardware_vreg
     hardware_irq
-    hardware_spi
     hardware_gpio
     hardware_resets
     rv_common)

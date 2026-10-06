@@ -1,4 +1,4 @@
-// rvlink SPI0 slave + DRQ (Pico A side of the Nano audio link).
+// rvlink PIO SPI slave (pio1) + DRQ (Pico A side of the Nano audio link).
 #ifndef LINK_SPI_H
 #define LINK_SPI_H
 

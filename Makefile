@@ -26,8 +26,6 @@ endif
 SRCS += src/drivers/audio_link.c
 OBJS := $(patsubst src/%,$(BUILD)/%.o,$(SRCS))
 
--include $(OBJS:.o=.d)
-
 all: $(NAME).elf $(NAME).bin $(NAME).lst
 
 $(BUILD)/%.c.o: src/%.c
@@ -120,3 +118,6 @@ clean:
 	rm -rf build
 
 .PHONY: all run-qemu opensbi fip usbboot pico pico-flash-audio pico-flash-panel test-panel test-link clean
+
+# Header dependencies (after all rules so 'all' stays the default goal).
+-include $(OBJS:.o=.d)

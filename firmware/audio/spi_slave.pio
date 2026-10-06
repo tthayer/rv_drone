@@ -1,0 +1,76 @@
+; SPI slave, mode 3 (CPOL=1 idle-high SCK, CPHA=1), MSB first, CS-framed.
+; Runs on pio1 (pio0 is I2S), one SM, clkdiv 1 (153.6 MHz).
+;
+; Pins (in_base = GP16): pin 0 = MOSI, pin 1 = CSn, pin 2 = SCK.
+;                        out_base = GP19 (MISO, 1 pin); jmp_pin = GP17 (CSn).
+;
+; Mode 3: the slave changes MISO on the SCK FALLING edge and samples MOSI on the
+; RISING edge. Both shifts are LEFT (MSB first), autopull 8 / autopush 8.
+;   - OUT left: the next bit is OSR[31]; a byte written to the TX FIFO sits in
+;     bits 31:24 (see link_spi.c, byte-lane notes).
+;   - IN left: the newest bit enters ISR[0]; after 8 bits the byte is ISR[7:0].
+; The caller preloads OSR with an explicit PULL before enabling the SM, so the
+; first falling edge already drives bit 7 of byte 0 (autopull alone would only
+; fill OSR on the first OUT).
+;
+; Per-bit instruction budget after the SCK rising edge: wait 1 (sees edge) ->
+; in -> jmp pin -> jmp bit -> wait 0: 4 more cycles = 26 ns < 64 ns half period
+; at 7.8 MHz, so the loop is always parked on "wait 0 pin 2" before the next
+; falling edge. MISO valid delay after SCK fall (input sync bypassed on SCK):
+; wait sees the pin (1) + out (1) + pad (~few ns) ~ 2-3 cycles ~ 20 ns, vs 30 ns
+; with the 2-cycle synchroniser. Neither eats the Nano's sample time (it samples
+; at the rising edge, 64 ns after the fall).
+;
+; CS handling: "idle" parks until CS is low. "jmp pin idle" after each sampled
+; bit returns to idle if CS has gone high, so a frame cut short while the SM is
+; awake cannot leave a partial-byte phase behind. The firmware ALSO restarts the
+; SM on every re-arm (pio_sm_restart clears ISR/OSR counters), so a partial byte
+; never survives into the next frame.
+
+.program spi_slave
+.wrap_target
+public idle:
+    wait 0 pin 1            ; CS asserted
+bit:
+    wait 0 pin 2            ; SCK falling  -> drive next MISO bit
+    out pins, 1
+    wait 1 pin 2            ; SCK rising   -> sample MOSI
+    in pins, 1
+    jmp pin idle            ; CS high -> frame over
+    jmp bit
+.wrap
+
+% c-sdk {
+#include "hardware/gpio.h"
+
+// mosi_pin = in_base (CS = +1, SCK = +2 must be consecutive), miso_pin = out.
+static inline void spi_slave_program_init(PIO pio, uint sm, uint offset,
+                                          uint mosi_pin, uint miso_pin) {
+    uint cs_pin = mosi_pin + 1, sck_pin = mosi_pin + 2;
+    pio_sm_config c = spi_slave_program_get_default_config(offset);
+    sm_config_set_in_pins(&c, mosi_pin);
+    sm_config_set_out_pins(&c, miso_pin, 1);
+    sm_config_set_jmp_pin(&c, cs_pin);
+    sm_config_set_in_shift(&c, false, true, 8);     // left, autopush 8
+    sm_config_set_out_shift(&c, false, true, 8);    // left, autopull 8
+    sm_config_set_clkdiv_int_frac(&c, 1, 0);
+
+    pio_gpio_init(pio, mosi_pin);
+    pio_gpio_init(pio, cs_pin);
+    pio_gpio_init(pio, sck_pin);
+    pio_gpio_init(pio, miso_pin);
+    pio_sm_set_consecutive_pindirs(pio, sm, mosi_pin, 3, false);
+    pio_sm_set_consecutive_pindirs(pio, sm, miso_pin, 1, true);
+
+    // Bypass the 2-flop input synchroniser on SCK and MOSI: -13 ns latency on
+    // the MISO update and the sample point. Tradeoff: no metastability
+    // filtering; an edge landing inside the flop's setup window can be seen one
+    // cycle early/late (harmless for a wait; MOSI is stable >= half a period
+    // around the rising edge so it never changes near a sample). CS keeps the
+    // synchroniser (not timing critical).
+    pio->input_sync_bypass |= (1u << sck_pin) | (1u << mosi_pin);
+
+    pio_sm_init(pio, sm, offset + spi_slave_offset_idle, &c);
+    // pio_sm_init leaves the SM disabled; link_spi.c enables it per frame.
+}
+%}

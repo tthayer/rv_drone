@@ -224,10 +224,11 @@ Its schematic is `SCH_UnitMIDI_B04`, dated 2024-07-08.
 
 **Electrical:**
 
-- SPI mode 3 (CPOL=1, CPHA=1). The RP2350's PL022 in slave mode with
-  CPHA=0 needs CS to toggle between frames, and mode 3 avoids that.
-- Start at 8 MHz. The slave limit is clk_peri/12, about 12.8 MHz at a
-  153.6 MHz sysclk.
+- SPI mode 3 (CPOL=1, CPHA=1). Pico A's slave is a PIO program on pio1
+  (`firmware/audio/spi_slave.pio`); the PL022 slave returned bytes one bit
+  early on hardware. Per-frame re-arm discards any partial byte.
+- Start at 1 MHz and raise toward ~7.8 MHz (PIO half-period budget: 64 ns
+  at 7.8 MHz vs about 26 ns of loop overhead at 153.6 MHz).
 - The payload needs about 3.2 Mbit/s.
 
 **Transaction (528 bytes each way; little-endian; CRC32 last):**

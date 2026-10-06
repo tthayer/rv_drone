@@ -1,16 +1,24 @@
-// SPI0 slave (mode 3, 8 bit) receiving rvlink_m2s_t and sending rvlink_s2m_t.
+// PIO SPI slave (pio1, spi_slave.pio; mode 3, 8 bit) receiving rvlink_m2s_t and
+// sending rvlink_s2m_t. The PL022 slave was replaced: on hardware it returned
+// every byte after byte 0 one bit early and saw short frames.
 //
-// Pins: GP16 RX (Nano MOSI), GP17 CSn, GP18 SCK, GP19 TX (Nano MISO), GP20 DRQ.
+// Pins: GP16 MOSI in, GP17 CSn, GP18 SCK, GP19 MISO out, GP20 DRQ.
 //
 // Arming sequence (link_arm), always run with CS high between frames:
-//   1. abort both DMA channels, ack the RX IRQ
-//   2. reset the SPI0 block (clears BOTH FIFOs, SR flags, shifter): a lost or
-//      extra byte can never leave stale data behind
+//   1. disable the SM, abort both DMA channels, ack the RX IRQ
+//   2. pio_sm_clear_fifos + pio_sm_restart (clears ISR/OSR shift counters, so a
+//      partial byte is discarded) + exec "jmp idle"
 //   3. [after a completed frame only] validate it, build+seal the next reply
-//   4. configure RX DMA (528 B, SPI RX DREQ -> rx buffer) and TX DMA (528 B,
-//      tx buffer -> SPI TX, DREQ-paced); start TX first so it pre-fills the
-//      8-entry TX FIFO while SSE is still off, then RX
-//   5. SSE on, then link_armed = true
+//   4. start TX DMA (528 B, tx buffer -> TXF, DREQ-paced; fills the 4-deep TX
+//      FIFO), wait for the first byte to land, exec "pull" to preload OSR, then
+//      start RX DMA (528 B, RXF -> rx buffer), enable the SM
+//   5. link_armed = true
+// Byte lanes (RP2350 datasheet, PIO chapter, TXF/RXF FIFO register access; same
+// usage as pico-examples pio/spi pio_spi.c): a narrow write to TXF is
+// replicated across all byte lanes, so an 8-bit DMA write puts the byte in bits
+// 31:24, which is where a left-shifting OSR takes its next bit from. With IN
+// shift left + autopush 8, the byte lands in ISR[7:0], so an 8-bit DMA read of
+// RXF (byte lane 0, little endian) returns it.
 // DRQ is raised only from link_spi_on_block() and only while armed with zero
 // bytes received. DRQ timing: raised once per block period (750 Hz), dropped
 // when the frame completes (RX DMA IRQ). If the previous request was never
@@ -18,10 +26,10 @@
 // fresh rising edge.
 //
 // Desync: a rising CS edge (GPIO IRQ) while the RX DMA is mid-frame
-// (0 < received < 528) is a short frame: count short_err, redo steps 1,2,4,5
-// (the prepared reply is reused). A frame longer than 528 B completes the DMA
-// early; the surplus is a partial frame in the next arming and is caught the
-// same way at the next CS rise.
+// (0 < received < 528) is a short frame: count short_err, redo the arming (the
+// prepared reply is reused). A frame longer than 528 B completes the DMA early;
+// the surplus is a partial frame in the next arming and is caught the same way
+// at the next CS rise.
 #include "link_spi.h"
 
 #include <string.h>
@@ -30,11 +38,11 @@
 #include "hardware/dma.h"
 #include "hardware/gpio.h"
 #include "hardware/irq.h"
-#include "hardware/regs/resets.h"
-#include "hardware/resets.h"
-#include "hardware/spi.h"
+#include "hardware/pio.h"
 
-#define PIN_RX    16
+#include "spi_slave.pio.h"
+
+#define PIN_RX    16    // in_base: +1 = CS, +2 = SCK
 #define PIN_CS    17
 #define PIN_SCK   18
 #define PIN_TX    19
@@ -51,42 +59,44 @@ static const volatile uint32_t *underruns_src;
 static int rx_ch, tx_ch;
 static volatile bool link_armed;
 
-static inline spi_hw_t *hw(void) { return spi_get_hw(spi0); }
+static PIO link_pio;
+static uint link_sm, link_off;
 
 static inline uint32_t rx_remaining(void) {
     return dma_channel_hw_addr(rx_ch)->transfer_count & 0x0FFFFFFFu;
 }
 
-static void spi_hw_reset(void) {
-    reset_block_num(RESET_SPI0);
-    unreset_block_num_wait_blocking(RESET_SPI0);
-    hw()->cpsr = 2;
-    hw()->cr0 = (7u << SPI_SSPCR0_DSS_LSB) | SPI_SSPCR0_SPO_BITS | SPI_SSPCR0_SPH_BITS;
-    hw()->cr1 = SPI_SSPCR1_MS_BITS;                 // slave, SSE still off
-    hw()->dmacr = SPI_SSPDMACR_RXDMAE_BITS | SPI_SSPDMACR_TXDMAE_BITS;
-}
-
 static void dma_setup_and_enable(void) {
+    pio_sm_set_enabled(link_pio, link_sm, false);
     dma_channel_abort(rx_ch);
     dma_channel_abort(tx_ch);
     dma_hw->ints1 = 1u << rx_ch;
-    spi_hw_reset();
+    pio_sm_clear_fifos(link_pio, link_sm);
+    pio_sm_restart(link_pio, link_sm);
+    pio_sm_exec(link_pio, link_sm, pio_encode_jmp(link_off + spi_slave_offset_idle));
 
     dma_channel_config c = dma_channel_get_default_config(tx_ch);
     channel_config_set_transfer_data_size(&c, DMA_SIZE_8);
     channel_config_set_read_increment(&c, true);
     channel_config_set_write_increment(&c, false);
-    channel_config_set_dreq(&c, spi_get_dreq(spi0, true));
-    dma_channel_configure(tx_ch, &c, &hw()->dr, &tx_buf, RVLINK_FRAME_LEN, true);
+    channel_config_set_dreq(&c, pio_get_dreq(link_pio, link_sm, true));
+    dma_channel_configure(tx_ch, &c, &link_pio->txf[link_sm], &tx_buf,
+                          RVLINK_FRAME_LEN, true);
 
     c = dma_channel_get_default_config(rx_ch);
     channel_config_set_transfer_data_size(&c, DMA_SIZE_8);
     channel_config_set_read_increment(&c, false);
     channel_config_set_write_increment(&c, true);
-    channel_config_set_dreq(&c, spi_get_dreq(spi0, false));
-    dma_channel_configure(rx_ch, &c, &rx_buf, &hw()->dr, RVLINK_FRAME_LEN, true);
+    channel_config_set_dreq(&c, pio_get_dreq(link_pio, link_sm, false));
+    dma_channel_configure(rx_ch, &c, &rx_buf, (const void *)&link_pio->rxf[link_sm],
+                          RVLINK_FRAME_LEN, true);
 
-    hw()->cr1 = SPI_SSPCR1_MS_BITS | SPI_SSPCR1_SSE_BITS;
+    // Preload OSR with byte 0 once the TX DMA has delivered it (a few cycles).
+    for (int i = 0; i < 1000 && pio_sm_is_tx_fifo_empty(link_pio, link_sm); i++)
+        tight_loop_contents();
+    pio_sm_exec(link_pio, link_sm, pio_encode_pull(false, true));
+
+    pio_sm_set_enabled(link_pio, link_sm, true);
     link_armed = true;
 }
 
@@ -112,6 +122,8 @@ static void cs_gpio_cb(uint gpio, uint32_t events) {
     (void)events;
     if (gpio != PIN_CS || !link_armed) return;
     busy_wait_us_32(2);                 // let the last byte reach memory via DMA
+    for (int i = 0; i < 20 && !pio_sm_is_rx_fifo_empty(link_pio, link_sm); i++)
+        busy_wait_us_32(1);             // drain bytes still queued in RXF
     if (!gpio_get(PIN_CS)) return;              // CS low again: a blip, not frame end
     if (!dma_channel_is_busy(rx_ch)) return;    // completed; DMA IRQ handles it
     uint32_t rem = rx_remaining();
@@ -142,11 +154,10 @@ void link_spi_init(const volatile uint32_t *src) {
     gpio_set_dir(PIN_DRQ, GPIO_OUT);
     gpio_put(PIN_DRQ, 0);
 
-    spi_hw_reset();
-    gpio_set_function(PIN_RX, GPIO_FUNC_SPI);
-    gpio_set_function(PIN_CS, GPIO_FUNC_SPI);
-    gpio_set_function(PIN_SCK, GPIO_FUNC_SPI);
-    gpio_set_function(PIN_TX, GPIO_FUNC_SPI);
+    link_pio = pio1;                    // pio0 is I2S
+    link_sm = pio_claim_unused_sm(link_pio, true);
+    link_off = pio_add_program(link_pio, &spi_slave_program);
+    spi_slave_program_init(link_pio, link_sm, link_off, PIN_RX, PIN_TX);
 
     rx_ch = dma_claim_unused_channel(true);
     tx_ch = dma_claim_unused_channel(true);
