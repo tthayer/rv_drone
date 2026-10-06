@@ -392,7 +392,7 @@ Synthesis is `float` on the Nano. RVV 0.7.1 is a later optimisation.
 | OSC  1/4 |          | | FILTER   |          | | SPACE    |          |  a
 | DETUNE   | DRIFT    | | CUTOFF   | RESO     | | DELAY    | REVERB   |  b
 |   12.5c  |   0.30   | |  1.2 kHz |   0.65   | |  850 ms  |   72 %   |  c
-| [####  ] | [##    ] | | [#####  ] | [###  ] | | [##    ] | [##### ] |  d
+| [####  ] | [##    ] | | [#####  ]| [###   ] | | [##    ] | [##### ] |  d
 +----------+----------+ +----------+----------+ +----------+----------+
    Enc 1      Enc 2        Enc 3      Enc 4        Enc 5      Enc 6
 ```
