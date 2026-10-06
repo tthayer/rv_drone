@@ -462,7 +462,11 @@ Behaviour:
     (it fired mid-frame) to a stall check at the block tick.
   - 10 min soak: 450k frames at 750/s, 0 CRC, magic, pattern, short or
     gap errors on either side.
-  - Remaining: Nano SPI DMA (in progress), so frames stop masking IRQs.
+  - Nano SPI DMA works (DW AXI DMAC, SPI2 handshakes 20/21, T-Head CMO).
+    10 min soak: 450k DMA frames, 0 errors on either side, 0 DMA errors,
+    and IRQs stay enabled during frames.
+  - All prerequisites are done. Next: render audio on the Nano and play it
+    from Pico A's ring.
 
 **Optional:**
 - **Faster USB boot:** slim OpenSBI (generic platform with only the 8250,
