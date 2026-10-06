@@ -64,6 +64,26 @@ To boot:
 4. UART0 (A16 TX / A17 RX, 115200 8N1) prints the boot log. A 5 V FTDI
    adapter needs a 1 kΩ / 1.8 kΩ divider on its TX line.
 
-If the Nano finds nothing bootable on the card, it shows up on USB as
-CVITEK "USB Com Port" (3346:1000). That is the SG2002 mask ROM's download
-mode.
+## Dev loop: USB boot (no SD card)
+
+With no bootable SD card in it, the Nano's mask ROM waits in USB download
+mode (CVITEK "USB Com Port", 3346:1000). `tools/usbboot.py` boots
+`fip.bin` straight into RAM. It writes nothing to flash or SD.
+
+One-time setup:
+
+    python3 -m venv .venv && .venv/bin/pip install pyserial
+    export USB_DL_MAGIC=~/src/duo-buildroot-sdk/build/tools/cv181x/usb_dl/rom_usb_dl/cv_dl_magic.bin
+    export RESET_PORT=/dev/cu.usbserial-XXXX     # UART0 adapter (optional)
+
+To boot each build:
+
+    make usbboot
+
+1. With RESET_PORT set, Ctrl-R is sent to the running image, which
+   warm-resets the chip into USB download mode. Otherwise, power-cycle the
+   board yourself.
+2. The image is pushed over USB and runs. Watch UART0 for its output.
+
+The connection needs USB-C from the Nano to the Mac (data plus power) and
+no SD card, or one without `fip.bin`. A boot takes about 20–40 s.
