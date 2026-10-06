@@ -57,6 +57,12 @@ build/park.bin: src/park/park.S
 
 export RTOS_BIN ?= build/park.bin
 
+# Vendor files (not in git): tools/get-vendor.sh fetches them into third_party/.
+export FIPTOOL       ?= $(CURDIR)/third_party/fiptool
+export FSBL_BIN      ?= $(FIPTOOL)/data/fsbl/cv181x.bin
+export DDR_PARAM_BIN ?= $(FIPTOOL)/data/ddr_param.bin
+USB_DL_MAGIC         ?= $(CURDIR)/third_party/usb_dl/cv_dl_magic.bin
+
 # OPENSBI_BIN defaults to our own build; override from the environment to use another.
 export OPENSBI_BIN ?= build/opensbi/fw_dynamic.bin
 
