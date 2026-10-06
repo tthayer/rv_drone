@@ -398,7 +398,20 @@ also run on the host (`emu/`).
 **Audio format:** 48 kHz exactly, stereo, 24-bit in 32-bit slots.
 Synthesis is `float` on the Nano. RVV 0.7.1 is a later optimisation.
 
-## Drone engine (initial sketch)
+## Drone engine
+
+Implemented in M7 (`src/engine/`); the sketch below is what it does, with
+these specifics: oscillators morph sine → polyBLEP saw (SHAPE), detune spread
+across the bank plus ±10 cents of per-partial drift, a sine sub one octave
+down, a stereo TPT SVF per voice with a per-voice sine LFO on cutoff (up to
+±3 octaves), a tanh-style saturator, then chorus (2 taps per side) → cross-fed
+damped delay (≤ 2 s) → 8-line Hadamard FDN reverb → volume + soft clip.
+Control rate is 32 frames. Latch: a note-on with no keys held starts a new
+chord. Boot latches D2 + A2 so the hardware makes sound without MIDI.
+CCs: 1 mod depth, 7 volume, 71 reso, 72 release, 73 attack, 74 cutoff,
+91 reverb, 93 chorus, 20–43 = parameters 0–23 in page order; 123 = all off.
+
+### Initial sketch
 
 - **Voices:** 4 drone voices. Each one is a bank of 3–7 detuned oscillators
   (saw / sine / wavetable morph) with a per-partial drift LFO.
@@ -503,7 +516,18 @@ Behaviour:
   - Follow-ups: pull-up on the Nano's UART2 RX pad (A29): with Pico B
     unpowered the line floats and the decoder counts noise as COBS/CRC
     errors. MIDI realtime (clock) is not forwarded yet.
-- **Next: M7** — drone engine + `emu/` host build.
+- **M7 (in progress, 2026-10-06):** drone engine + `emu/`.
+  - `src/engine/` (engine.c, params.c, dsp.h: no libm, identical on host and
+    Nano), `src/ui/ui.c` (4 pages × 6 params, MIDI routing),
+    `src/app/panel_ui.c` (panel glue), `emu/main.c` (SDL2 window + audio,
+    `--wav` offline render with level stats; `make emu`, `make emu-wav`).
+  - Host: default drone renders clean (peak −6 dBFS, no NaN/DC; spectrum
+    shows D2/A2 partials and the sub octave).
+  - Nano: 240–290 µs per 64-frame block = 18–21 % of the budget with 1–2
+    voices × 5 oscillators; link clean (345k frames, 0 late, ring 4).
+  - Open: verify encoders/pages/MIDI driving the engine on hardware; measure
+    worst case (4 voices × 7 oscillators). Pico A's PCM5102A module drops
+    out intermittently (digital side verified clean: suspect XSMT/jack).
 
 **Optional:**
 - **Faster USB boot:** slim OpenSBI (generic platform with only the 8250,

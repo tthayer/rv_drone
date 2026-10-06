@@ -7,8 +7,9 @@
 #include "timer.h"
 #include "reset.h"
 #include "audio_link.h"
-#include "tone.h"
 #include "panel_link.h"
+#include "panel_ui.h"
+#include "engine.h"
 #include "ui.h"
 #ifdef BOARD_HAS_SPI_LINK
 #include "spi.h"
@@ -48,6 +49,47 @@ size_t strlen(const char *s)
         n++;
     return n;
 }
+
+#ifdef BOARD_HAS_SPI_LINK
+/* Engine -> rvlink block (main-loop context: float is safe here). Timed for
+ * the console and the header's CPU figure. */
+#define RENDER_MAX 64
+static uint64_t render_ticks_sum, render_blocks, render_last_avg;
+static uint32_t render_max_ticks;
+
+static void render_block(int32_t *lr, unsigned frames)
+{
+    float l[RENDER_MAX], r[RENDER_MAX];
+    uint64_t t0 = rdtime();
+    engine_render(l, r, (int)frames);
+    for (unsigned i = 0; i < frames; i++) {
+        float a = l[i] < -1.0f ? -1.0f : l[i] > 1.0f ? 1.0f : l[i];
+        float b = r[i] < -1.0f ? -1.0f : r[i] > 1.0f ? 1.0f : r[i];
+        lr[2 * i] = (int32_t)(a * 8388607.0f) * 256;       /* 24-bit, left-aligned */
+        lr[2 * i + 1] = (int32_t)(b * 8388607.0f) * 256;
+    }
+    uint32_t dt = (uint32_t)(rdtime() - t0);
+    render_ticks_sum += dt;
+    render_blocks++;
+    if (dt > render_max_ticks)
+        render_max_ticks = dt;
+}
+
+static uint64_t render_avg_us(void)
+{
+    uint64_t avg = render_blocks ? render_ticks_sum / render_blocks : 0;
+    render_ticks_sum = 0;
+    render_blocks = 0;
+    render_last_avg = avg;
+    return avg * 1000000ull / BOARD_TIMEBASE_HZ;
+}
+
+static uint64_t render_load_pct(void)
+{
+    /* 64 frames at 48 kHz = 1333 us = BOARD_TIMEBASE_HZ / 750 ticks */
+    return render_last_avg * 100ull * 750ull / BOARD_TIMEBASE_HZ;
+}
+#endif
 
 #define REG32(a) (*(volatile uint32_t *)(uintptr_t)(a))
 
@@ -94,15 +136,16 @@ void main(uint64_t hartid, uint64_t fdt)
 
 #ifdef BOARD_HAS_SPI_LINK
     __asm__ volatile("csrs sstatus, %0" :: "r"(1u << 13));   /* FS=Initial: float in main loop */
-    tone_init(330.0f, 0.5f);           /* E4, -6 dBFS: not Pico A's old 440 Hz */
-    audio_link_set_render(tone_render);
+    engine_init(48000.0f);             /* latches a D2+A2 drone */
+    ui_init();
+    audio_link_set_render(render_block);
     if (audio_link_init() == 0) {
         spi_dump();
         uart_puts("m4: audio link up (SPI2 mode 3, DRQ A27 irq ");
         uart_put_dec(BOARD_GPIO_IRQ);
         uart_puts("); 't' = force one transfer, 'd' = toggle SPI DMA (now ");
         uart_puts(audio_link_dma_active() ? "on)" : "off)");
-        uart_puts(", 'p' = test pattern <-> 330 Hz sine\n");
+        uart_puts(", 'p' = test pattern <-> engine\n");
     } else {
         uart_puts("m4: audio link init FAILED (CTRLR0 readback)\n");
     }
@@ -113,7 +156,7 @@ void main(uint64_t hartid, uint64_t fdt)
         uart_puts("m6: panel link up (UART2 A28 TX / A29 RX, 1562500 8N1, irq ");
         uart_put_dec(BOARD_UART2_IRQ_OR_0);
         uart_puts(")\n");
-        ui_init();
+        panel_ui_init();
     } else {
         uart_puts("m6: panel link unavailable\n");
     }
@@ -131,7 +174,7 @@ void main(uint64_t hartid, uint64_t fdt)
         __asm__ volatile("csrsi sstatus, 2");
         audio_link_poll();
         uint64_t t = timer_ticks;
-        ui_service(t * 1000 / BOARD_TICK_HZ);
+        panel_ui_service(t * 1000 / BOARD_TICK_HZ);
         panel_link_poll();
         if (t / BOARD_TICK_HZ != last_sec) {
             last_sec = t / BOARD_TICK_HZ;
@@ -178,6 +221,13 @@ void main(uint64_t hartid, uint64_t fdt)
             uart_puts(", cobs "); uart_put_dec(p->peer_cobs_err);
             uart_puts(", drop "); uart_put_dec(p->peer_dropped);
             uart_puts(")\n");
+            uart_puts("engine: render avg "); uart_put_dec(render_avg_us());
+            uart_puts(" us  max "); uart_put_dec(render_max_ticks * 1000000ull / BOARD_TIMEBASE_HZ);
+            uart_puts(" us per 64-frame block (budget 1333), load ");
+            uart_put_dec(render_load_pct()); uart_puts("%, voices ");
+            uart_put_dec((uint64_t)engine_voices_active()); uart_putc('\n');
+            ui_set_load((int)render_load_pct());
+            render_max_ticks = 0;
             uart_puts("dma: "); uart_puts(audio_link_dma_active() ? "on" : "off");
             uart_puts(" frames "); uart_put_dec(l->dma_frames);
             uart_puts(" err "); uart_put_dec(l->dma_err);
