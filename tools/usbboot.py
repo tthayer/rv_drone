@@ -23,6 +23,7 @@ import argparse
 import binascii
 import struct
 import sys
+import termios
 import time
 
 import serial
@@ -48,11 +49,17 @@ def find_port(timeout):
     return None
 
 
-def open_port(dev):
-    time.sleep(0.1)
-    s = serial.Serial(dev, 115200, timeout=0.5, write_timeout=1)
-    s.reset_input_buffer()
-    return s
+def open_port(dev, tries=40):
+    # The ROM drops and re-enumerates right after attach, and gives up on USB
+    # if no download starts soon, so retry the open quickly, not after a delay.
+    for i in range(tries):
+        try:
+            s = serial.Serial(dev, 115200, timeout=0.5, write_timeout=1)
+            s.reset_input_buffer()
+            return s
+        except (serial.SerialException, OSError, termios.error):
+            time.sleep(0.05)
+    raise serial.SerialException(f"could not open {dev}")
 
 
 def packet(token, addr, data=b"", length=None):
@@ -112,7 +119,6 @@ def main():
             log("device gone: image is running")
             return
         wait = 3
-        time.sleep(1.0)                             # ROM re-enumerates once on attach
         try:
             s = open_port(dev)
             off, size = send_acked(s, packet(TOK_KEEP_DL, DUMMY_ADDR, magic), a.retries)
@@ -124,7 +130,7 @@ def main():
             send_data(s, fip[off:off + size], 0, a.chunk, a.retries)
             finish_stage(s)
             stage += 1
-        except (serial.SerialException, OSError, RuntimeError) as e:
+        except (serial.SerialException, OSError, RuntimeError, termios.error) as e:
             drops += 1
             log(f"\nstage {stage}: {e}; reconnecting ({drops})")
             if drops > 10:
