@@ -7,6 +7,7 @@
 #include "timer.h"
 #include "reset.h"
 #include "audio_link.h"
+#include "tone.h"
 #ifdef BOARD_HAS_SPI_LINK
 #include "spi.h"
 #endif
@@ -73,12 +74,16 @@ void main(uint64_t hartid, uint64_t fdt)
     uart_async_tx(1);                  /* from here prints never block */
 
 #ifdef BOARD_HAS_SPI_LINK
+    __asm__ volatile("csrs sstatus, %0" :: "r"(1u << 13));   /* FS=Initial: float in main loop */
+    tone_init(330.0f, 0.5f);           /* E4, -6 dBFS: not Pico A's old 440 Hz */
+    audio_link_set_render(tone_render);
     if (audio_link_init() == 0) {
         spi_dump();
         uart_puts("m4: audio link up (SPI2 mode 3, DRQ A27 irq ");
         uart_put_dec(BOARD_GPIO_IRQ);
         uart_puts("); 't' = force one transfer, 'd' = toggle SPI DMA (now ");
-        uart_puts(audio_link_dma_active() ? "on)\n" : "off)\n");
+        uart_puts(audio_link_dma_active() ? "on)" : "off)");
+        uart_puts(", 'p' = test pattern <-> 330 Hz sine\n");
     } else {
         uart_puts("m4: audio link init FAILED (CTRLR0 readback)\n");
     }
@@ -122,7 +127,9 @@ void main(uint64_t hartid, uint64_t fdt)
             uart_puts("  slave(seq "); uart_put_dec(l->slave_seq_echo);
             uart_puts(", crc_err "); uart_put_dec(l->slave_crc_err);
             uart_puts(", underruns "); uart_put_dec(l->slave_underruns);
-            uart_puts(")  total "); uart_put_dec(fr);
+            uart_puts(", ring "); uart_put_dec(l->slave_ring_fill);
+            uart_puts(")  "); uart_puts(audio_link_test_mode() ? "pattern" : "audio");
+            uart_puts("  total "); uart_put_dec(fr);
             uart_puts(" drq "); uart_put_dec(l->drq_edges);
             uart_puts(" spi_err "); uart_put_dec(l->spi_err);
             uart_puts(" txdrop "); uart_put_dec(uart_tx_dropped);
@@ -153,6 +160,11 @@ void main(uint64_t hartid, uint64_t fdt)
             if (c == 'd') {                        /* M5: DMA <-> polled SPI frames */
                 audio_link_set_dma(!audio_link_dma_active());
                 uart_puts(audio_link_dma_active() ? "link: SPI DMA on\n" : "link: SPI polled\n");
+                continue;
+            }
+            if (c == 'p') {                        /* M5: test pattern <-> rendered audio */
+                audio_link_set_test(!audio_link_test_mode());
+                uart_puts(audio_link_test_mode() ? "link: test pattern\n" : "link: audio\n");
                 continue;
             }
             if (c == 't') {                        /* M4: scope trigger, no DRQ needed */

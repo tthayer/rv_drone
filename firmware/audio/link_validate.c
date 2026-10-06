@@ -20,11 +20,12 @@ link_result_t link_validate(link_stats_t *s, const rvlink_m2s_t *f) {
 
 static uint16_t sat16(uint32_t v) { return v > 0xFFFFu ? 0xFFFFu : (uint16_t)v; }
 
-void link_build_reply(const link_stats_t *s, uint32_t underruns, rvlink_s2m_t *out) {
+void link_build_reply(const link_stats_t *s, uint32_t underruns, uint32_t ring_fill,
+                      rvlink_s2m_t *out) {
     memset(out, 0, sizeof *out);
     out->magic = RVLINK_MAGIC_S2M;
     out->seq_echo = s->last_seq;
-    out->ring_fill = 0;                 // no ring until M5
+    out->ring_fill = ring_fill > 0xFFu ? 0xFFu : (uint8_t)ring_fill;
     out->underruns = sat16(underruns);
     out->crc_errors = sat16(s->crc_err);
     for (size_t i = 0; i < sizeof out->pad; i++) out->pad[i] = (uint8_t)(0xA5u ^ i);

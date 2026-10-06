@@ -9,6 +9,9 @@ void audio_link_poll(void) {}
 void audio_link_kick(void) {}
 int audio_link_dma_active(void) { return 0; }
 void audio_link_set_dma(int on) { (void)on; }
+void audio_link_set_render(audio_link_render_fn fn) { (void)fn; }
+void audio_link_set_test(int on) { (void)on; }
+int audio_link_test_mode(void) { return 0; }
 const volatile audio_link_stats_t *audio_link_stats(void) { return &st; }
 #else
 #include "rvlink.h"
@@ -38,6 +41,8 @@ static volatile int done_flag;         /* DMA frame finished, frame_done() still
 static volatile int done_rc;
 static volatile uint64_t xfer_start;
 static uint32_t dma_fail_streak;
+static audio_link_render_fn render;
+static int test_mode;
 #define DMA_TIMEOUT (BOARD_TIMEBASE_HZ / 100)     /* 10 ms; a frame takes ~0.55 ms */
 #define DMA_MAX_FAILS 3
 #define DRQ_HOLDOFF (BOARD_TIMEBASE_HZ / 50000)   /* 20 us */
@@ -75,9 +80,14 @@ static void prepare_next(void)
     uint8_t *a = (uint8_t *)tx_frame.audio;
     tx_frame.magic = RVLINK_MAGIC_M2S;
     tx_frame.seq = seq;
-    tx_frame.flags = RVLINK_F_TEST;
-    for (size_t i = 0; i < RVLINK_AUDIO_LEN; i++)
-        a[i] = rvlink_test_byte(seq, i);
+    if (render && !test_mode) {
+        tx_frame.flags = 0;
+        render(tx_frame.audio, RVLINK_BLOCK_FRAMES);
+    } else {
+        tx_frame.flags = RVLINK_F_TEST;
+        for (size_t i = 0; i < RVLINK_AUDIO_LEN; i++)
+            a[i] = rvlink_test_byte(seq, i);
+    }
     tx_frame.pad = 0;
     rvlink_seal(&tx_frame);
     tx_ready = 1;
@@ -114,6 +124,10 @@ void audio_link_set_dma(int on)
 }
 
 void audio_link_kick(void) { pending = 1; }
+
+void audio_link_set_render(audio_link_render_fn fn) { render = fn; }
+void audio_link_set_test(int on) { test_mode = on; }
+int audio_link_test_mode(void) { return test_mode || !render; }
 
 static void frame_done(int rc, uint32_t dt)
 {

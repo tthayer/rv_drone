@@ -19,7 +19,8 @@ ASFLAGS := -march=rv64gc -mabi=lp64d -mcmodel=medany -DBOARD_$(BOARD_UP) -Wall -
 LDFLAGS := -nostdlib -static -Wl,-T,src/boot/link.ld -Wl,-Map,$(NAME).map -Wl,--gc-sections -Wl,--no-warn-rwx-segments
 
 SRCS := src/boot/start.S src/boot/trap.S src/hal/uart.c src/hal/trap.c \
-       src/hal/timer.c src/hal/plic.c src/hal/reset.c src/hal/cache.c src/hal/dma.c src/app/main.c
+       src/hal/timer.c src/hal/plic.c src/hal/reset.c src/hal/cache.c src/hal/dma.c src/app/main.c \
+       src/app/tone.c
 ifeq ($(BOARD),nano)
 SRCS += src/hal/pinmux.c src/hal/gpio.c src/hal/spi.c
 endif

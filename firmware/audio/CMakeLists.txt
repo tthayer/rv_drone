@@ -28,4 +28,4 @@ pico_add_extra_outputs(audio)
 target_compile_options(audio PRIVATE -Wall -Wextra)
 
 pico_set_program_name(audio "rv_drone audio (Pico A)")
-pico_set_program_description(audio "PIO I2S 48 kHz / 64 fs to PCM5102A")
+pico_set_program_description(audio "rvlink audio -> PIO I2S 48 kHz / 64 fs to PCM5102A")

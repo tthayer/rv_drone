@@ -356,15 +356,27 @@ also run on the host (`emu/`).
   (0x03000298 [18:10]); handshake slots 0/1 remapped to SPI2 RX/TX (req 20/21)
   in `sdma_dma_ch_remap0` (0x03000154). `BOARD_SPI_DMA=0` (EXTRA_CFLAGS) or
   the `d` console key selects the polled path; 3 consecutive DMA faults fall
-  back to polled automatically. UNVERIFIED on hardware.
+  back to polled automatically. Verified on hardware (10 min soak, 0 errors).
 - **Little core (C906L):** unused. The FSBL starts the vendor `cvirtos.bin`
   on it (see Unverified), and it will later be replaced by a parking loop.
 
 **Pico A:**
 
-- Core 0 runs the link: SPI0 DMA and DRQ, into the ring.
-- PIO DMA feeds I2S from the ring.
-- An underrun plays silence and is reported.
+- Core 0 runs the link: PIO SPI slave + DMA and DRQ, into the ring
+  (`firmware/audio/audio_ring.h`: 8 blocks, primed to 4 = 5.3 ms).
+- PIO DMA feeds I2S from the ring. Good frames without `RVLINK_F_TEST` are
+  pushed; test frames are only validated.
+- Flow control: DRQ is raised at each I2S block tick while the ring holds
+  fewer than 4 blocks, plus a catch-up request 30 µs after a frame that left
+  it short (priming, a lost frame). So the Nano renders exactly at the DAC
+  rate, and no rate matching is needed.
+- An underrun plays silence, is reported (`underruns` in the reply) and
+  re-primes the ring.
+- **Nano side (M5 test source):** `src/app/tone.c` renders a 330 Hz sine in
+  main-loop context. The trap entry does not save FP registers, so float code
+  must stay out of IRQ handlers. The `p` console key switches to the M4 test
+  pattern (the ring then starves and catch-up requests run at about
+  1180 frames/s).
 
 **Pico B:**
 
@@ -435,7 +447,7 @@ Behaviour:
 | M2 ✅ | Pico SDK tree; Pico A PIO I2S at 153.6 MHz sysclk | Clean 440 Hz sine from the PCM5102A; 10 min soak, 0 late refills, 750±1 blocks/s (2026-10-06) |
 | M3 ✅ | Pico B: encoders, switches, 3 OLEDs, MIDI (Unit MIDI) | 6 encoders, 6 switches, 3 OLEDs (0x3C/0x3D on I2C0, 0x3C on I2C1) and MIDI in all working (2026-10-06) |
 | M4 ✅ | Nano pinmux, GPIO IRQ, SPI2 master (polled); Pico A PIO SPI slave | rvlink test pattern at 7.8 MHz: 10 min soak, 433k frames, 4 CRC errors, 0 pattern errors (2026-10-06). DMA + cache moved to M5 |
-| M5 | rvlink end to end | The Nano's sine plays via Pico A; 0 CRC errors and 0 underruns over 10 min |
+| M5 ✅ | rvlink end to end | Nano 330 Hz sine plays via Pico A's ring: 10 min soak, 457k frames, 0 CRC errors, 0 underruns, 0 late refills (2026-10-06) |
 | M6 | Nano UART2 + rvpanel end to end | Encoders and MIDI reach the Nano; the Nano draws on all 3 OLEDs |
 | M7 | Drone engine + `emu/` host build | Engine plays on the host, then on hardware via the panel and MIDI |
 | M8 | SDHCI + FatFs presets | Save and load across power cycles |
@@ -444,7 +456,8 @@ Behaviour:
 ### Status (2026-10-06)
 
 **Done:**
-- **M0–M4:** done on hardware. The Nano⇄Pico A SPI link carries test frames at 7.8 MHz.
+- **M0–M5:** done on hardware. The Nano renders audio and streams it over
+  rvlink (SPI2 DMA, 7.8 MHz) into Pico A's ring and out of the PCM5102A.
   - Pico A plays a clean 440 Hz tone through the PCM5102A
     (`make pico-flash-audio`).
   - Pico B reads 6 encoders, 6 switches and MIDI, and drives 3 OLEDs
@@ -456,8 +469,13 @@ Behaviour:
   per-second PLIC counters). Trim them once M4 is stable.
 
 **Next:**
-- **M5:** real audio over rvlink.
-  - Done 2026-10-06: non-blocking Nano console; DRQ hold-off for 20 µs
+- **M5 ✅ (2026-10-06):** real audio over rvlink.
+  - Nano renders a 330 Hz sine (`src/app/tone.c`); Pico A plays it from an
+    8-block ring with DRQ flow control (see Runtime model). 10 min soak:
+    457k frames at 750/s; 0 CRC/magic/DMA/SPI errors on the Nano; Pico A 0 CRC,
+    short, underrun, overflow or late; ring steady at 3–4 blocks.
+    2 spurious DRQ edges were filtered (crosstalk).
+  - Earlier prerequisites: non-blocking Nano console; DRQ hold-off for 20 µs
     after each frame; Pico A short detection moved from the CS edge IRQ
     (it fired mid-frame) to a stall check at the block tick.
   - 10 min soak: 450k frames at 750/s, 0 CRC, magic, pattern, short or
@@ -465,8 +483,8 @@ Behaviour:
   - Nano SPI DMA works (DW AXI DMAC, SPI2 handshakes 20/21, T-Head CMO).
     10 min soak: 450k DMA frames, 0 errors on either side, 0 DMA errors,
     and IRQs stay enabled during frames.
-  - All prerequisites are done. Next: render audio on the Nano and play it
-    from Pico A's ring.
+- **Next: M6** — Nano UART2 + rvpanel end to end (encoders and MIDI reach
+  the Nano; the Nano draws on all 3 OLEDs).
 
 **Optional:**
 - **Faster USB boot:** slim OpenSBI (generic platform with only the 8250,

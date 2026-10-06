@@ -19,11 +19,12 @@
 // 31:24, which is where a left-shifting OSR takes its next bit from. With IN
 // shift left + autopush 8, the byte lands in ISR[7:0], so an 8-bit DMA read of
 // RXF (byte lane 0, little endian) returns it.
-// DRQ is raised only from link_spi_on_block() and only while armed with zero
-// bytes received. DRQ timing: raised once per block period (750 Hz), dropped
-// when the frame completes (RX DMA IRQ). If the previous request was never
-// served, DRQ is pulsed low for 2 us and raised again so the Nano always sees a
-// fresh rising edge.
+// DRQ is raised only while armed with zero bytes received and the ring below
+// AUDIO_RING_TARGET: at each block tick (750 Hz, after the I2S pop), and right
+// after a frame if the ring is still short (priming, or a lost frame). It is
+// dropped when the frame completes (RX DMA IRQ). If the previous request was
+// never served, DRQ is pulsed low for 2 us and raised again so the Nano always
+// sees a fresh rising edge.
 //
 // Desync: a rising CS edge (GPIO IRQ) while the RX DMA is mid-frame
 // (0 < received < 528) is a short frame: count short_err, redo the arming (the
@@ -51,13 +52,15 @@
 #define LINK_IRQ         DMA_IRQ_1
 #define PRIO_AUDIO       0x00
 #define PRIO_LINK        0x80
+#define CATCHUP_DELAY_US 30u     // > the Nano's 20 us DRQ hold-off
 
 static rvlink_m2s_t rx_buf __attribute__((aligned(4)));
 static rvlink_s2m_t tx_buf __attribute__((aligned(4)));
 static link_stats_t stats;
-static const volatile uint32_t *underruns_src;
+static audio_ring_t *ring;
 static int rx_ch, tx_ch;
 static volatile bool link_armed;
+static uint32_t stats_catchups;
 
 static PIO link_pio;
 static uint link_sm, link_off;
@@ -106,7 +109,7 @@ static void link_arm(bool new_reply) {
     last_rem = RVLINK_FRAME_LEN;
     link_armed = false;
     if (new_reply)
-        link_build_reply(&stats, *underruns_src, &tx_buf);
+        link_build_reply(&stats, ring->underruns, audio_ring_fill(ring), &tx_buf);
     dma_setup_and_enable();
 }
 
@@ -114,10 +117,24 @@ static void link_arm(bool new_reply) {
 static void __isr link_dma_irq(void) {
     if (!(dma_hw->ints1 & (1u << rx_ch))) return;
     dma_hw->ints1 = 1u << rx_ch;
+    uint32_t t_end = time_us_32();
     link_armed = false;
     gpio_put(PIN_DRQ, 0);
-    link_validate(&stats, &rx_buf);
+    if (link_validate(&stats, &rx_buf) == LINK_OK && !(rx_buf.flags & RVLINK_F_TEST))
+        audio_ring_push(ring, (const int32_t *)rx_buf.audio);
     link_arm(true);
+    // Still short: ask again now rather than at the next tick, so priming and
+    // lost frames catch up. The Nano ignores DRQ edges for 20 us after a frame.
+    if (audio_ring_fill(ring) < AUDIO_RING_TARGET) {
+        while (time_us_32() - t_end < CATCHUP_DELAY_US)
+            tight_loop_contents();
+        stats_catchups++;
+        if (gpio_get_out_level(PIN_DRQ)) {  // a tick raised it inside the hold-off
+            gpio_put(PIN_DRQ, 0);
+            busy_wait_us_32(2);
+        }
+        gpio_put(PIN_DRQ, 1);
+    }
 }
 
 // CS rising edge: normally the end of a frame (RX DMA done or about to be).
@@ -142,6 +159,7 @@ void link_spi_on_block(void) {
         return;
     }
     last_rem = RVLINK_FRAME_LEN;
+    if (audio_ring_fill(ring) >= AUDIO_RING_TARGET) return;
     if (gpio_get_out_level(PIN_DRQ)) {
         gpio_put(PIN_DRQ, 0);           // previous request unserved: new edge
         busy_wait_us_32(2);
@@ -151,8 +169,10 @@ void link_spi_on_block(void) {
 
 void link_spi_get_stats(link_stats_t *out) { *out = stats; }
 
-void link_spi_init(const volatile uint32_t *src) {
-    underruns_src = src;
+uint32_t link_spi_catchups(void) { return stats_catchups; }
+
+void link_spi_init(audio_ring_t *r) {
+    ring = r;
     memset(&stats, 0, sizeof stats);
 
     gpio_init(PIN_DRQ);

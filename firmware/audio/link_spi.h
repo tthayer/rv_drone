@@ -4,15 +4,20 @@
 
 #include <stdint.h>
 #include "link_validate.h"
+#include "audio_ring.h"
 
-// underruns_src: counter reported to the Nano as "underruns" (audio late count).
-void link_spi_init(const volatile uint32_t *underruns_src);
+// Good non-test frames are pushed into ring; its fill and underruns go in the reply.
+void link_spi_init(audio_ring_t *ring);
 
-// Call from the I2S block-completion IRQ (750 Hz). Raises DRQ if armed.
+// Call from the I2S block-completion IRQ (750 Hz), after the ring pop. Raises DRQ
+// if armed and the ring is below AUDIO_RING_TARGET.
 // Must run at a higher IRQ priority than the link's own IRQs.
 void link_spi_on_block(void);
 
 // Copies a consistent-enough snapshot of the counters.
 void link_spi_get_stats(link_stats_t *out);
+
+// DRQ requests raised right after a frame because the ring was still short.
+uint32_t link_spi_catchups(void);
 
 #endif

@@ -1,12 +1,11 @@
-// Pico A (audio): 440 Hz stereo sine out of PIO I2S, 48 kHz, 64 fs.
+// Pico A (audio): plays the Nano's rvlink audio out of PIO I2S, 48 kHz, 64 fs.
 //
 // sysclk 153.6 MHz -> PIO clkdiv 25 -> 6.144 MHz = 48 kHz * 64 bits * 2 cycles.
 // Two DMA channels, chained A -> B -> A, each moving one block of 64 stereo
 // frames into the PIO TX FIFO. The completion IRQ of a channel re-arms its read
-// pointer and refills its buffer while the other channel plays.
-// fill_block() is the single source hook: later it takes the rvlink ring.
+// pointer and refills its buffer from the rvlink ring (audio_ring.h) while the
+// other channel plays. Silence while the ring primes or after an underrun.
 
-#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 
@@ -20,6 +19,7 @@
 #include "audio_i2s.pio.h"
 #include "rv_audio.h"
 #include "link_spi.h"
+#include "audio_ring.h"
 
 #define PIN_BCK   10    // LRCK is GP11 (side-set), see audio_i2s.pio
 #define PIN_DIN   12
@@ -37,31 +37,13 @@ static_assert(SYS_HZ % PIO_HZ == 0, "PIO divider must be integral");
 #define PIO_CLKDIV    (SYS_HZ / PIO_HZ)
 static_assert(PIO_CLKDIV == 25, "expected PIO clkdiv 25");
 
-#define TONE_HZ       440u
-#define TONE_AMP      0.5f      // -6 dBFS
-
 static int32_t blocks[2][RV_BLOCK_WORDS] __attribute__((aligned(4)));
 static int dma_ch[2];
 
 static volatile uint32_t block_count;   // DMA block completions
 static volatile uint32_t late_count;    // refills that missed their deadline
 
-// Phase-accumulator sine. phase is 32 bit, so 440 Hz is exact to the clock.
-static uint32_t tone_phase;
-static const uint32_t tone_inc =
-    (uint32_t)(((uint64_t)TONE_HZ << 32) / RV_SAMPLE_RATE_HZ);
-
-// Fill one block: 64 stereo frames, int32 L,R interleaved, 24-bit left-aligned.
-static void fill_block(int32_t *dst, unsigned frames) {
-    for (unsigned i = 0; i < frames; i++) {
-        // Top 24 bits of phase convert to float exactly.
-        float x = (float)(tone_phase >> 8) * (6.28318530717958647692f / 16777216.0f);
-        int32_t s = (int32_t)(sinf(x) * TONE_AMP * 8388607.0f) * 256;   // << 8
-        dst[2 * i] = s;
-        dst[2 * i + 1] = s;
-        tone_phase += tone_inc;
-    }
-}
+static audio_ring_t ring;
 
 static void __isr dma_irq_handler(void) {
     for (int i = 0; i < 2; i++) {
@@ -72,7 +54,7 @@ static void __isr dma_irq_handler(void) {
         // is busy again, it was re-triggered with a stale read pointer: late.
         if (dma_channel_is_busy(dma_ch[i])) late_count++;
         dma_channel_set_read_addr(dma_ch[i], blocks[i], false);
-        fill_block(blocks[i], RV_BLOCK_FRAMES);
+        audio_ring_pop(&ring, blocks[i]);
         block_count++;
         link_spi_on_block();
     }
@@ -111,9 +93,8 @@ int main(void) {
     uint offset = pio_add_program(pio, &audio_i2s_program);
     audio_i2s_program_init(pio, sm, offset, PIN_DIN, PIN_BCK, PIO_CLKDIV);
 
-    // Both blocks are filled before the first sample goes out.
-    fill_block(blocks[0], RV_BLOCK_FRAMES);
-    fill_block(blocks[1], RV_BLOCK_FRAMES);
+    static_assert(RV_BLOCK_WORDS == AUDIO_RING_WORDS, "block size");
+    // Both blocks start silent (static); the ring primes from the Nano.
 
     dma_ch[0] = dma_claim_unused_channel(true);
     dma_ch[1] = dma_claim_unused_channel(true);
@@ -131,20 +112,22 @@ int main(void) {
     irq_set_exclusive_handler(DMA_IRQ_0, dma_irq_handler);
     irq_set_enabled(DMA_IRQ_0, true);
 
-    link_spi_init(&late_count);             // armed before the first DRQ
+    link_spi_init(&ring);                   // armed before the first DRQ
 
     dma_channel_start(dma_ch[0]);           // block 0, then chain to 1, 0, ...
     pio_sm_set_enabled(pio, sm, true);
-    printf("I2S running: %u Hz tone, BCK GP%d LRCK GP%d DIN GP%d\n",
-           TONE_HZ, PIN_BCK, PIN_BCK + 1, PIN_DIN);
+    printf("I2S running from the rvlink ring (%u blocks, prime %u): BCK GP%d LRCK GP%d DIN GP%d\n",
+           AUDIO_RING_BLOCKS, AUDIO_RING_TARGET, PIN_BCK, PIN_BCK + 1, PIN_DIN);
 
     uint32_t last_blocks = 0, last_ok = 0;
     for (;;) {
         sleep_ms(1000);
         uint32_t b = block_count;
-        printf("blocks/s %lu (expect %u)  late %lu\n",
+        printf("blocks/s %lu (expect %u)  late %lu  ring fill %lu %s underruns %lu overflows %lu catchups %lu\n",
                (unsigned long)(b - last_blocks), RV_BLOCKS_PER_SEC,
-               (unsigned long)late_count);
+               (unsigned long)late_count, (unsigned long)audio_ring_fill(&ring),
+               ring.playing ? "playing" : "priming", (unsigned long)ring.underruns,
+               (unsigned long)ring.overflows, (unsigned long)link_spi_catchups());
         last_blocks = b;
         link_stats_t ls;
         link_spi_get_stats(&ls);

@@ -26,6 +26,7 @@ typedef enum { LINK_OK = 0, LINK_CRC, LINK_MAGIC, LINK_PATTERN } link_result_t;
 link_result_t link_validate(link_stats_t *s, const rvlink_m2s_t *f);
 
 // Fills and seals the next reply. pad[i] = (uint8_t)(0xA5 ^ i).
-void link_build_reply(const link_stats_t *s, uint32_t underruns, rvlink_s2m_t *out);
+void link_build_reply(const link_stats_t *s, uint32_t underruns, uint32_t ring_fill,
+                      rvlink_s2m_t *out);
 
 #endif

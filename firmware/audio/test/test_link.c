@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "link_validate.h"
+#include "audio_ring.h"
 
 static int fails;
 #define CHECK(c) do { if (!(c)) { printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); fails++; } } while (0)
@@ -62,15 +63,37 @@ int main(void) {
     // Reply.
     rvlink_s2m_t r;
     s.short_err = 2;
-    link_build_reply(&s, 70000, &r);
-    CHECK(r.magic == RVLINK_MAGIC_S2M && r.seq_echo == 6 && r.ring_fill == 0);
+    link_build_reply(&s, 70000, 4, &r);
+    CHECK(r.magic == RVLINK_MAGIC_S2M && r.seq_echo == 6 && r.ring_fill == 4);
     CHECK(r.underruns == 0xFFFF && r.crc_errors == s.crc_err);
     int pad_ok = 1;
     for (size_t i = 0; i < sizeof r.pad; i++) pad_ok &= r.pad[i] == (uint8_t)(0xA5 ^ i);
     CHECK(pad_ok);
     CHECK(rvlink_check(&r));
-    link_build_reply(&s, 3, &r);
-    CHECK(r.underruns == 3);
+    link_build_reply(&s, 3, 300, &r);
+    CHECK(r.underruns == 3 && r.ring_fill == 0xFF);
+
+    // Ring: priming, FIFO order, underrun -> re-prime, overflow.
+    static audio_ring_t ring;
+    int32_t in[AUDIO_RING_WORDS], out[AUDIO_RING_WORDS];
+    for (int b = 0; b < (int)AUDIO_RING_TARGET - 1; b++) {
+        for (unsigned i = 0; i < AUDIO_RING_WORDS; i++) in[i] = b * 1000 + (int)i;
+        CHECK(audio_ring_push(&ring, in));
+        audio_ring_pop(&ring, out);                     // still priming: silence
+        CHECK(out[0] == 0 && out[5] == 0 && !ring.playing);
+    }
+    for (unsigned i = 0; i < AUDIO_RING_WORDS; i++) in[i] = 3000 + (int)i;
+    CHECK(audio_ring_push(&ring, in));                  // reaches TARGET
+    for (int b = 0; b < (int)AUDIO_RING_TARGET; b++) {
+        audio_ring_pop(&ring, out);
+        CHECK(ring.playing && out[0] == b * 1000 && out[127] == b * 1000 + 127);
+    }
+    audio_ring_pop(&ring, out);                         // empty while playing
+    CHECK(ring.underruns == 1 && !ring.playing && out[0] == 0 && audio_ring_fill(&ring) == 0);
+    for (unsigned b = 0; b < AUDIO_RING_BLOCKS; b++) CHECK(audio_ring_push(&ring, in));
+    CHECK(!audio_ring_push(&ring, in) && ring.overflows == 1);
+    audio_ring_pop(&ring, out);                         // re-primed, plays again
+    CHECK(ring.playing && out[0] == 3000 && audio_ring_fill(&ring) == AUDIO_RING_BLOCKS - 1);
 
     printf(fails ? "test_link: %d FAILED\n" : "test_link: all passed\n", fails);
     return fails != 0;
