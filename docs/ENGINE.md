@@ -240,13 +240,20 @@ doesn't break older files.
   | reverb | 8 × 8192 floats = 256 KiB |
   | chorus | 2 × 2048 floats = 16 KiB |
 
-- **Cores and caches** (SG2002 Preliminary Datasheet V1.0-alpha, §1.2.2):
+- **Cores and caches** (SG2002 TRM §2.3.1, and the Preliminary Datasheet V1.0-alpha §1.2.2):
   - **main C906 @ 1.0 GHz** (what we run): 32 KB I-cache, **64 KB D-cache**,
     vector + FPU, **no L2 listed**;
   - **Cortex-A53 @ 1.0 GHz**, the alternative main core chosen by a boot pin
     (GPIO_RTX / EPHY_RTX): 32/32 KB L1 + **128 KB L2**, NEON + FPU;
   - **coprocessor C906 @ 700 MHz** (parked today): FPU, no vector unit listed,
     cache sizes not given.
+  - **Clocks to check on hardware:** the TRM clock table gives `clk_c906_0`
+    (main core) a reset default of **fpll / 2 = 750 MHz** and `clk_c906_1`
+    (coprocessor) **fpll / 3 = 500 MHz**, with other PLL sources selectable.
+    Whether the vendor FSBL raises the main core to 1 GHz is unverified. Measure
+    it (`rdcycle` against the 25 MHz `rdtime` over 1 s). If it is at 750 MHz,
+    every CPU figure in this document was taken at 750 MHz, and moving to the
+    1 GHz source would add about 33 %.
 
   Working sets (reuse distance, the live data between a write and its
   read-back) against the main core's 64 KB L1 D-cache:
