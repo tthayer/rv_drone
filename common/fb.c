@@ -4,27 +4,46 @@
 
 #include "font5x7.h"
 
+void fb_mark_dirty(fb_t *fb, unsigned p, unsigned lo, unsigned hi) {
+    if (p >= FB_PAGES || lo > hi || hi >= FB_W) return;
+    uint8_t bit = (uint8_t)(1u << p);
+    if (fb->dirty & bit) {
+        if (lo < fb->lo[p]) fb->lo[p] = (uint8_t)lo;
+        if (hi > fb->hi[p]) fb->hi[p] = (uint8_t)hi;
+    } else {
+        fb->lo[p] = (uint8_t)lo;
+        fb->hi[p] = (uint8_t)hi;
+        fb->dirty |= bit;
+    }
+}
+
 void fb_clear(fb_t *fb) {
     for (unsigned p = 0; p < FB_PAGES; p++) {
+        int lo = -1, hi = -1;
         for (unsigned x = 0; x < FB_W; x++) {
             if (fb->buf[p][x]) {
-                fb->dirty |= (uint8_t)(1u << p);
-                break;
+                if (lo < 0) lo = (int)x;
+                hi = (int)x;
             }
         }
+        if (lo >= 0) fb_mark_dirty(fb, p, (unsigned)lo, (unsigned)hi);
     }
     memset(fb->buf, 0, sizeof fb->buf);
 }
 
 void fb_set_page(fb_t *fb, unsigned page, const uint8_t data[FB_W]) {
     if (page >= FB_PAGES) return;
-    if (memcmp(fb->buf[page], data, FB_W) == 0) return;
-    memcpy(fb->buf[page], data, FB_W);
-    fb->dirty |= (uint8_t)(1u << page);
+    uint8_t *row = fb->buf[page];
+    unsigned lo = 0, hi = FB_W;
+    while (lo < FB_W && row[lo] == data[lo]) lo++;
+    if (lo == FB_W) return;                          // unchanged
+    while (hi > lo && row[hi - 1] == data[hi - 1]) hi--;
+    memcpy(row + lo, data + lo, hi - lo);
+    fb_mark_dirty(fb, page, lo, hi - 1);
 }
 
 void fb_mark_all_dirty(fb_t *fb) {
-    fb->dirty = 0xFF;
+    for (unsigned p = 0; p < FB_PAGES; p++) fb_mark_dirty(fb, p, 0, FB_W - 1);
 }
 
 void fb_update(fb_t *dst, const fb_t *src) {

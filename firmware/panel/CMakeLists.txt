@@ -15,6 +15,7 @@ pico_generate_pio_header(panel ${CMAKE_CURRENT_LIST_DIR}/quadrature.pio)
 
 target_link_libraries(panel PRIVATE
     pico_stdlib
+    pico_multicore
     hardware_pio
     hardware_i2c
     hardware_uart

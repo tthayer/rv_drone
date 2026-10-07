@@ -63,7 +63,8 @@ it in and copy `audio.uf2` to the RPI-RP2 drive. The console is USB CDC: it
 prints the sysclk (153.6 MHz), the PIO divider (25) and, once a second, the
 block count (expect 750/s), late refills, the audio ring (fill, playing or
 priming, underruns, overflows, catch-up requests) and the rvlink receive
-counters. Pico A plays only what the Nano sends: silence until the ring has
+counters. `link: hwcrc` means the frames are checked by the DMA sniffer's
+hardware CRC (boot self-test passed); `hw/sw-mismatch` should stay 0. Pico A plays only what the Nano sends: silence until the ring has
 primed.
 
 PCM5102A wiring for M2 (Pico A):
@@ -114,6 +115,12 @@ M5Stack Unit MIDI (Grove cable): white to GP21 (pin 27), red to VBUS (pin 40)
 (VSYS, pin 39, in the single-supply build), black to GND, mode switch on
 **Bypass**. See the architecture doc for the
 reasoning and what is still unverified about the 3.5 mm input.
+
+Pico B uses both cores. Core 1 writes the displays at 1 MHz I2C, falling
+back to 400 kHz if a display doesn't ACK at 1 MHz, and sends only each page's
+changed columns. Core 0 handles inputs and the Nano link. The banner shows the
+I2C speed, and an `oled: bytes …` line once a second shows the data written per
+display.
 
 The console (USB CDC) prints a banner (re-printed when a terminal connects),
 then `enc N delta D total T`, `sw N down|up` and `midi note_on ch C note N vel

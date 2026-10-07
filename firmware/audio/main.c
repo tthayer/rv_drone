@@ -113,6 +113,8 @@ int main(void) {
     irq_set_enabled(DMA_IRQ_0, true);
 
     link_spi_init(&ring);                   // armed before the first DRQ
+    printf("rvlink CRC: %s\n", link_spi_hw_crc() ? "hardware (DMA sniffer, self-test ok)"
+                                                 : "software (sniffer self-test failed)");
 
     dma_channel_start(dma_ch[0]);           // block 0, then chain to 1, 0, ...
     pio_sm_set_enabled(pio, sm, true);
@@ -131,10 +133,12 @@ int main(void) {
         last_blocks = b;
         link_stats_t ls;
         link_spi_get_stats(&ls);
-        printf("link: ok %lu/s crc %lu magic %lu pattern %lu short %lu gaps %lu\n",
+        printf("link: %s ok %lu/s crc %lu magic %lu pattern %lu short %lu gaps %lu hw/sw-mismatch %lu\n",
+               link_spi_hw_crc() ? "hwcrc" : "swcrc",
                (unsigned long)(ls.frames_ok - last_ok), (unsigned long)ls.crc_err,
                (unsigned long)ls.magic_err, (unsigned long)ls.pattern_err,
-               (unsigned long)ls.short_err, (unsigned long)ls.seq_gaps);
+               (unsigned long)ls.short_err, (unsigned long)ls.seq_gaps,
+               (unsigned long)link_spi_crc_mismatch());
         last_ok = ls.frames_ok;
     }
 }

@@ -7,20 +7,26 @@
 // framebuffers. Until the first page arrives, or when the Nano has been
 // silent for NANO_TIMEOUT_MS, the local stand-in UI (render.c) is drawn.
 //
-// Core 0 only. Switches are sampled by a 1 kHz repeating timer; MIDI bytes are
-// collected by the UART1 RX interrupt so the (blocking) I2C flushes cannot
-// overflow the 32-byte UART FIFO; encoder counts live in the PIO and are
-// absolute, so nothing is lost while the loop is busy.
+// Core 0: inputs, the Nano link, events, local rendering. Switches are sampled
+// by a 1 kHz repeating timer; MIDI bytes are collected by the UART1 RX
+// interrupt; encoder counts live in the PIO and are absolute.
+// Core 1: the display writer. It owns the I2C buses after boot and streams each
+// display's dirty column ranges as fast as the bus allows, so core 0 never
+// blocks on I2C. The framebuffers are shared under fb_lock (held only for a
+// page copy). I2C runs at 1 MHz if every display ACKs at that speed, else 400 kHz.
 
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "pico/stdlib.h"
 #include "hardware/clocks.h"
 #include "hardware/gpio.h"
 #include "hardware/i2c.h"
 #include "hardware/irq.h"
+#include "hardware/sync.h"
 #include "hardware/uart.h"
+#include "pico/multicore.h"
 
 #include "debounce.h"
 #include "encoders.h"
@@ -35,15 +41,15 @@
 #define PIN_I2C0_SCL    5
 #define PIN_I2C1_SDA    26
 #define PIN_I2C1_SCL    27
-#define I2C_HZ          400000
+#define I2C_HZ_SAFE     400000  // probe and init speed
+#define I2C_HZ_FAST     1000000 // Fast-mode Plus, used if every display ACKs at it
 
 #define MIDI_UART       uart1
 #define MIDI_UART_IRQ   UART1_IRQ
 #define PIN_MIDI_RX     21
 #define MIDI_BAUD       31250
 
-#define REFRESH_MS      33      // ~30 Hz
-#define PAGES_PER_TICK  3       // I2C budget per display per refresh
+#define REFRESH_MS      33      // ~30 Hz local render (the Nano paces its own pages)
 #define TEST_PATTERN_MS 1500
 #define NANO_TIMEOUT_MS 2500    // the Nano resends every page each second
 
@@ -143,6 +149,9 @@ static bool oled_stale[N_OLED];             // needs a re-render
 static bool oled_probe_ok[N_OLED];
 static bool bus_ack[2][2];                  // [bus][0x3C, 0x3D]
 static bool midi_was_lit;
+static spin_lock_t *fb_lock;                // oled_fb[] between core 0 and core 1
+static uint32_t i2c_hz = I2C_HZ_SAFE;
+static volatile int contrast_req = -1;      // core 0 -> core 1 (CONFIG packet)
 static bool nano_owned;                     // displays show the Nano's pages
 static uint32_t nano_pages;
 
@@ -151,12 +160,12 @@ static void mark_all_stale(void) {
 }
 
 static void i2c_buses_init(void) {
-    i2c_init(i2c0, I2C_HZ);
+    i2c_init(i2c0, I2C_HZ_SAFE);
     gpio_set_function(PIN_I2C0_SDA, GPIO_FUNC_I2C);
     gpio_set_function(PIN_I2C0_SCL, GPIO_FUNC_I2C);
     gpio_pull_up(PIN_I2C0_SDA);
     gpio_pull_up(PIN_I2C0_SCL);
-    i2c_init(i2c1, I2C_HZ);
+    i2c_init(i2c1, I2C_HZ_SAFE);
     gpio_set_function(PIN_I2C1_SDA, GPIO_FUNC_I2C);
     gpio_set_function(PIN_I2C1_SCL, GPIO_FUNC_I2C);
     gpio_pull_up(PIN_I2C1_SDA);
@@ -171,7 +180,8 @@ static void probe_buses(void) {
 }
 
 static void print_banner(void) {
-    printf("\n== rv_drone panel (Pico B), M6 ==\n");
+    printf("\n== rv_drone panel (Pico B) ==\n");
+    printf("I2C %lu kHz, display writer on core 1\n", (unsigned long)(i2c_hz / 1000));
     printf("sysclk %lu Hz\n", (unsigned long)clock_get_hz(clk_sys));
     for (int b = 0; b < 2; b++) {
         printf("I2C%d:", b);
@@ -213,6 +223,62 @@ static void displays_init(void) {
     }
 }
 
+// Raise both buses to 1 MHz and confirm every present display still ACKs;
+// otherwise fall back to 400 kHz. Boot only (before core 1 starts).
+static void i2c_go_fast(void) {
+    i2c_set_baudrate(i2c0, I2C_HZ_FAST);
+    i2c_set_baudrate(i2c1, I2C_HZ_FAST);
+    bool ok = true;
+    for (unsigned d = 0; d < N_OLED; d++)
+        if (oled[d].present && !ssd1306_nop(&oled[d])) ok = false;
+    if (!ok) {
+        i2c_set_baudrate(i2c0, I2C_HZ_SAFE);
+        i2c_set_baudrate(i2c1, I2C_HZ_SAFE);
+    }
+    i2c_hz = ok ? I2C_HZ_FAST : I2C_HZ_SAFE;
+}
+
+// Core 1: one dirty range per display per pass, round-robin over pages.
+static void core1_display_writer(void) {
+    for (;;) {
+        bool any = false;
+        for (unsigned d = 0; d < N_OLED; d++) {
+            ssd1306_t *dev = &oled[d];
+            if (!dev->present) continue;
+            uint8_t row[FB_W];
+            unsigned page = FB_PAGES, lo = 0, hi = 0;
+            uint32_t irq = spin_lock_blocking(fb_lock);
+            fb_t *fb = &oled_fb[d];
+            for (unsigned i = 0; i < FB_PAGES; i++) {
+                unsigned p = (dev->next_page + i) % FB_PAGES;
+                if (!(fb->dirty & (1u << p))) continue;
+                page = p;
+                lo = fb->lo[p];
+                hi = fb->hi[p];
+                memcpy(row + lo, fb->buf[p] + lo, hi - lo + 1);
+                fb->dirty &= (uint8_t)~(1u << p);
+                break;
+            }
+            spin_unlock(fb_lock, irq);
+            if (page == FB_PAGES) continue;
+            any = true;
+            dev->next_page = (uint8_t)((page + 1) % FB_PAGES);
+            if (!ssd1306_write_range(dev, page, lo, hi, row)) {
+                dev->errors++;
+                irq = spin_lock_blocking(fb_lock);
+                fb_mark_dirty(&oled_fb[d], page, lo, hi);     // retry later
+                spin_unlock(fb_lock, irq);
+            }
+        }
+        int c = contrast_req;
+        if (c >= 0) {
+            contrast_req = -1;
+            for (unsigned d = 0; d < N_OLED; d++) ssd1306_set_contrast(&oled[d], (uint8_t)c);
+        }
+        if (!any) sleep_us(100);
+    }
+}
+
 static void refresh_displays(uint32_t now) {
     bool lit = render_midi_lit(&st, now);
     if (lit != midi_was_lit) {              // box turned on or timed out
@@ -223,10 +289,11 @@ static void refresh_displays(uint32_t now) {
         if (!oled[d].present) continue;
         if (oled_stale[d] && !nano_owned) {
             render_display(&scratch, d, &st, now);
-            fb_update(&oled_fb[d], &scratch);   // only changed pages become dirty
+            uint32_t irq = spin_lock_blocking(fb_lock);
+            fb_update(&oled_fb[d], &scratch);   // only changed ranges become dirty
+            spin_unlock(fb_lock, irq);
             oled_stale[d] = false;
         }
-        ssd1306_flush(&oled[d], &oled_fb[d], PAGES_PER_TICK);
     }
 }
 
@@ -285,13 +352,14 @@ static void on_page(unsigned d, unsigned page, const uint8_t *data) {
         nano_owned = true;
         printf("nano: owns the displays\n");
     }
-    fb_set_page(&oled_fb[d], page, data);       // marks the page dirty if it changed
+    uint32_t irq = spin_lock_blocking(fb_lock);
+    fb_set_page(&oled_fb[d], page, data);       // marks the changed column range dirty
+    spin_unlock(fb_lock, irq);
 }
 
 static void on_config(const uint8_t *p, unsigned len) {
     if (len < 1) return;
-    for (unsigned d = 0; d < N_OLED; d++)
-        if (oled[d].present) ssd1306_set_contrast(&oled[d], p[0]);
+    contrast_req = p[0];                        // applied by core 1, which owns the buses
 }
 
 static const nano_link_handlers_t nano_handlers = { on_page, on_config };
@@ -355,7 +423,10 @@ int main(void) {
     i2c_buses_init();
     printf("panel: uarts+i2c ok\n");
     displays_init();
-    printf("panel: displays ok\n");
+    i2c_go_fast();
+    fb_lock = spin_lock_init(spin_lock_claim_unused(true));
+    multicore_launch_core1(core1_display_writer);
+    printf("panel: displays ok, I2C %lu kHz, display writer on core 1\n", (unsigned long)(i2c_hz / 1000));
     print_banner();
 
     mark_all_stale();
@@ -401,6 +472,9 @@ int main(void) {
             nano_link_send_status();
             nano_link_stats_t ls;
             nano_link_get_stats(&ls);
+            printf("oled: bytes %lu/%lu/%lu errors %lu/%lu/%lu\n",
+                   (unsigned long)oled[0].bytes, (unsigned long)oled[1].bytes, (unsigned long)oled[2].bytes,
+                   (unsigned long)oled[0].errors, (unsigned long)oled[1].errors, (unsigned long)oled[2].errors);
             printf("nano link: %s rx %lu B ok %lu crc %lu cobs %lu drop %lu pages %lu tx %lu\n",
                    nano_owned ? "nano" : "local", (unsigned long)ls.rx_bytes,
                    (unsigned long)ls.rx_ok, (unsigned long)ls.crc_err,

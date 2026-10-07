@@ -82,7 +82,8 @@ int main(void) {
         audio_ring_pop(&ring, out);                     // still priming: silence
         CHECK(out[0] == 0 && out[5] == 0 && !ring.playing);
     }
-    for (unsigned i = 0; i < AUDIO_RING_WORDS; i++) in[i] = 3000 + (int)i;
+    const int last = ((int)AUDIO_RING_TARGET - 1) * 1000;  // block that completes priming
+    for (unsigned i = 0; i < AUDIO_RING_WORDS; i++) in[i] = last + (int)i;
     CHECK(audio_ring_push(&ring, in));                  // reaches TARGET
     for (int b = 0; b < (int)AUDIO_RING_TARGET; b++) {
         audio_ring_pop(&ring, out);
@@ -93,7 +94,22 @@ int main(void) {
     for (unsigned b = 0; b < AUDIO_RING_BLOCKS; b++) CHECK(audio_ring_push(&ring, in));
     CHECK(!audio_ring_push(&ring, in) && ring.overflows == 1);
     audio_ring_pop(&ring, out);                         // re-primed, plays again
-    CHECK(ring.playing && out[0] == 3000 && audio_ring_fill(&ring) == AUDIO_RING_BLOCKS - 1);
+    CHECK(ring.playing && out[0] == last && audio_ring_fill(&ring) == AUDIO_RING_BLOCKS - 1);
+
+    // Hardware-CRC path: the verdict is supplied; body + rvlink_seal == build_reply.
+    link_stats_t s2;
+    memset(&s2, 0, sizeof s2);
+    make_frame(&f, 1, 0);
+    CHECK(link_validate_crc(&s2, &f, 1) == LINK_OK && s2.frames_ok == 1);
+    CHECK(link_validate_crc(&s2, &f, 0) == LINK_CRC && s2.crc_err == 1 && s2.frames_ok == 1);
+    rvlink_s2m_t r1, r2;
+    link_build_reply(&s2, 5, 3, &r1);
+    link_build_reply_body(&s2, 5, 3, &r2);
+    rvlink_seal(&r2);
+    CHECK(memcmp(&r1, &r2, sizeof r1) == 0);
+    // CRC-32/ISO-HDLC residue: crc over (frame incl. its stored CRC) == 0x2144DF1C,
+    // the value Pico A's DMA sniffer checks a received frame against.
+    CHECK(rvlink_crc32(&f, RVLINK_FRAME_LEN) == 0x2144DF1Cu);
 
     printf(fails ? "test_link: %d FAILED\n" : "test_link: all passed\n", fails);
     return fails != 0;

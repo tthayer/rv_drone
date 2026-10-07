@@ -225,8 +225,8 @@ Its schematic is `SCH_UnitMIDI_B04`, dated 2024-07-08.
 
 **Roles:**
 
-- Pico A is the audio clock master. It keeps a ring of 4 blocks (64 stereo
-  frames each) feeding PIO I2S at exactly 48 kHz.
+- Pico A is the audio clock master. It keeps a ring of up to 8 blocks (64
+  stereo frames each), primed to 3, feeding PIO I2S at exactly 48 kHz.
 - It raises **DRQ** whenever a slot is free and its status reply is
   preloaded.
 - The Nano answers each DRQ with one fixed-length, full-duplex SPI
@@ -251,8 +251,22 @@ Its schematic is `SCH_UnitMIDI_B04`, dated 2024-07-08.
 
 - **Errors:** a CRC failure drops the block (Pico A plays silence for it)
   and bumps a counter. A sequence gap counts as an underrun.
-- **Latency:** at most 4 × 64 frames ≈ 5.3 ms. The Nano always has the next
-  block rendered before DRQ arrives.
+- **CRC on Pico A, in hardware:** the RP2350 DMA sniffer runs on the RX
+  channel. It is set to CRC-32 on bit-reversed data, with output reversed and
+  inverted and a seed of ~0, which equals zlib's CRC-32. So each frame is
+  checked as it arrives, with no software pass.
+  - Over the whole 528 bytes, including the stored CRC, a good frame leaves
+    the residue **0x2144DF1C**.
+  - Between frames, the same sniffer seals the reply, through a mem-to-null
+    DMA channel.
+  - A boot self-test compares the sniffer with the software `rvlink_crc32`
+    (including the "123456789" check value). If they differ, the link stays
+    on software CRC (console: `rvlink CRC: hardware|software`).
+  - Once a second, one live frame is also checked in software. Disagreements
+    show as `hw/sw-mismatch`, which should be 0.
+- **Latency:** the ring is primed to 3 × 64 frames = 4.0 ms (it was 4
+  blocks, 5.3 ms, until 2026-10-07). The Nano always has the next block
+  rendered before DRQ arrives.
 - **Pico A clock:** sysclk is 153.6 MHz (48 kHz × 64 × 50), so the PIO
   divider is an integer and adds no fractional-divider jitter.
 
@@ -288,8 +302,17 @@ Its schematic is `SCH_UnitMIDI_B04`, dated 2024-07-08.
 - **Budget:** about 150 KB/s. A full frame on all 3 displays is about
   3.1 KB, so the link supports about 48 full refreshes per second, far
   more than the I2C side.
-- **I2C refresh:** I2C0 carries two displays at 400 kHz (1 MHz if the
-  modules tolerate it). Pico B writes pages as they arrive.
+- **I2C refresh (Pico B):**
+  - Both buses probe and initialise at 400 kHz, then switch to **1 MHz**
+    (Fast-mode Plus) if every display ACKs a NOP at that speed, else they stay
+    at 400 kHz. The banner prints the speed.
+  - 1 MHz relies on the OLED modules' own pull-ups (typically 4.7–10 kΩ).
+  - Only each page's **changed column range** is sent (`fb_t.lo/hi`,
+    `ssd1306_write_range`), so turning a knob rewrites a few dozen bytes
+    instead of whole 128-byte pages.
+  - Core 1 does all I2C writes, so core 0 never blocks.
+  - The once-a-second `oled: bytes …` console line shows the data volume per
+    display.
 - **MIDI latency:** MIDI goes through Pico B and the UART. That adds about
   0.1 ms, which is negligible.
 
@@ -389,25 +412,34 @@ also run on the host (`emu/`).
 **Pico A:**
 
 - Core 0 runs the link: PIO SPI slave + DMA and DRQ, into the ring
-  (`firmware/audio/audio_ring.h`: 8 blocks, primed to 4 = 5.3 ms).
+  (`firmware/audio/audio_ring.h`: 8 blocks, primed to 3 = 4.0 ms). The CRC is
+  checked by the DMA sniffer (see "Audio link").
 - PIO DMA feeds I2S from the ring. Good frames without `RVLINK_F_TEST` are
   pushed; test frames are only validated.
 - Flow control: DRQ is raised at each I2S block tick while the ring holds
-  fewer than 4 blocks, plus a catch-up request 30 µs after a frame that left
+  fewer than 3 blocks (`AUDIO_RING_TARGET`), plus a catch-up request 30 µs after a frame that left
   it short (priming, a lost frame). So the Nano renders exactly at the DAC
   rate, and no rate matching is needed.
 - An underrun plays silence, is reported (`underruns` in the reply) and
   re-primes the ring.
-- **Nano side (M5 test source):** `src/app/tone.c` renders a 330 Hz sine in
-  main-loop context. The trap entry does not save FP registers, so float code
-  must stay out of IRQ handlers. The `p` console key switches to the M4 test
-  pattern (the ring then starves and catch-up requests run at about
-  1180 frames/s).
+- **Nano side:** the drone engine (`docs/ENGINE.md`) renders each block in
+  main-loop context. The 330 Hz test tone of M5 was replaced by the engine in
+  M7. The trap entry does not save FP registers, so float code must stay out
+  of IRQ handlers. The `p` console key switches to the M4 test pattern (the
+  ring then starves and catch-up requests run at about 1180 frames/s).
 
 **Pico B:**
 
-- Core 0 runs the panel link (UART0 with DMA) and the I2C display writers.
-- Core 1 runs the encoder PIO FIFOs, switch debounce and the MIDI parser.
+- **Core 0:**
+  - the inputs: encoder PIO counts, the 1 kHz switch debounce timer, and the
+    MIDI UART1 IRQ, which also forwards clock;
+  - the panel link (UART0 RX IRQ ring, rvpanel decode and sends);
+  - the local fallback UI.
+- **Core 1:** the display writer. It owns both I2C buses after boot and loops
+  over the displays, writing one dirty column range per display per pass.
+  Contrast changes reach it as a request.
+- **Sharing:** the framebuffers are shared under a hardware spin lock held
+  only for a page copy, so neither core waits on the other's I2C traffic.
 
 **Audio format:** 48 kHz exactly, stereo, 24-bit in 32-bit slots.
 Synthesis is `float` on the Nano. RVV 0.7.1 is a later optimisation.

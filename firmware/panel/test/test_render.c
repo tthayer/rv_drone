@@ -62,6 +62,25 @@ int main(int argc, char **argv) {
     render_display(&scratch, 0, &s, 1050);
     fb_update(&shown, &scratch);
     CHECK(shown.dirty != 0 && !(shown.dirty & 1u));
+    // The counter lives in the left half: dirty ranges stay inside columns 0..63.
+    for (unsigned p = 0; p < FB_PAGES; p++)
+        if (shown.dirty & (1u << p)) CHECK(shown.lo[p] <= shown.hi[p] && shown.hi[p] < 64);
+
+    // Column ranges: one changed byte -> exactly that column; a second widens it.
+    fb_t f;
+    memset(&f, 0, sizeof f);
+    uint8_t row[FB_W] = { 0 };
+    row[40] = 0xFF;
+    fb_set_page(&f, 2, row);
+    CHECK(f.dirty == (1u << 2) && f.lo[2] == 40 && f.hi[2] == 40);
+    row[90] = 0x0F;
+    fb_set_page(&f, 2, row);
+    CHECK(f.lo[2] == 40 && f.hi[2] == 90);
+    fb_set_page(&f, 2, row);                        // unchanged: range untouched
+    CHECK(f.lo[2] == 40 && f.hi[2] == 90);
+    f.dirty = 0;
+    fb_mark_all_dirty(&f);
+    CHECK(f.dirty == 0xFF && f.lo[5] == 0 && f.hi[5] == FB_W - 1);
     // MIDI box timing
     CHECK(render_midi_lit(&s, 1050));
     CHECK(!render_midi_lit(&s, 1000 + MIDI_FLASH_MS));

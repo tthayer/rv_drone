@@ -52,14 +52,25 @@ void ssd1306_init(ssd1306_t *dev, i2c_inst_t *i2c, uint8_t addr) {
     dev->present = write_cmds(dev, init_seq, sizeof init_seq);
 }
 
-static bool write_page(ssd1306_t *dev, unsigned page, const uint8_t *data) {
-    const uint8_t setpos[] = { (uint8_t)(0xB0 | page), 0x00, 0x10 };   // page, col 0
+bool ssd1306_write_range(ssd1306_t *dev, unsigned page, unsigned lo, unsigned hi,
+                         const uint8_t *row) {
+    if (!dev->present || page >= FB_PAGES || lo > hi || hi >= FB_W) return false;
+    // page addressing mode: page, then column low/high nibble; data auto-increments
+    const uint8_t setpos[] = { (uint8_t)(0xB0 | page), (uint8_t)(0x00 | (lo & 0x0F)),
+                               (uint8_t)(0x10 | (lo >> 4)) };
     if (!write_cmds(dev, setpos, sizeof setpos)) return false;
+    unsigned n = hi - lo + 1;
     uint8_t buf[1 + FB_W];
     buf[0] = CTRL_DATA;
-    memcpy(buf + 1, data, FB_W);
-    return i2c_write_timeout_us(dev->i2c, dev->addr, buf, sizeof buf, false, I2C_TIMEOUT_US)
-           == (int)sizeof buf;
+    memcpy(buf + 1, row + lo, n);
+    dev->bytes += n;
+    return i2c_write_timeout_us(dev->i2c, dev->addr, buf, n + 1, false, I2C_TIMEOUT_US)
+           == (int)(n + 1);
+}
+
+bool ssd1306_nop(ssd1306_t *dev) {
+    static const uint8_t nop[] = { 0xE3 };
+    return dev->present && write_cmds(dev, nop, sizeof nop);
 }
 
 unsigned ssd1306_flush(ssd1306_t *dev, fb_t *fb, unsigned max_pages) {
@@ -68,7 +79,7 @@ unsigned ssd1306_flush(ssd1306_t *dev, fb_t *fb, unsigned max_pages) {
     for (unsigned i = 0; i < FB_PAGES && done < max_pages; i++) {
         unsigned p = (dev->next_page + i) % FB_PAGES;
         if (!(fb->dirty & (1u << p))) continue;
-        if (write_page(dev, p, fb->buf[p])) {
+        if (ssd1306_write_range(dev, p, fb->lo[p], fb->hi[p], fb->buf[p])) {
             fb->dirty &= (uint8_t)~(1u << p);
             done++;
         } else {
