@@ -410,7 +410,9 @@ also run on the host (`emu/`).
 - Core 1 runs the encoder PIO FIFOs, switch debounce and the MIDI parser.
 
 **Audio format:** 48 kHz exactly, stereo, 24-bit in 32-bit slots.
-Synthesis is `float` on the Nano. RVV 0.7.1 is a later optimisation.
+Synthesis is `float` on the Nano. RVV 0.7.1 (XTheadVector): an oscillator-bank
+kernel plus a boot-time probe and self-test (`src/hal/vec.c`); see `docs/ENGINE.md`,
+"SIMD (RVV) and profiling".
 
 ## Drone engine
 

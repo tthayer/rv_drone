@@ -10,6 +10,8 @@
 #include "panel_link.h"
 #include "panel_ui.h"
 #include "engine.h"
+#include "osc.h"
+#include "vec.h"
 #include "ui.h"
 #include "preset_fs.h"
 #include "sd.h"
@@ -96,6 +98,70 @@ static uint64_t render_avg_us(void)
     return avg * 1000000ull / BOARD_TIMEBASE_HZ;
 }
 
+static uint64_t now_ticks(void) { return rdtime(); }
+
+/* Scalar vs RVV oscillator kernel on the same random bank: prints the largest
+ * difference. Returns 1 if they agree (< 1e-4). Main-loop context. */
+static int simd_selftest(void)
+{
+    if (!vec_ok()) return 0;
+    osc_bank_t a, b;
+    uint32_t r = 0x9e3779b9u;
+    a.n = OSC_MAX;
+    for (int k = 0; k < OSC_MAX; k++) {
+        r ^= r << 13; r ^= r >> 17; r ^= r << 5;
+        a.ph[k] = r;
+        float dt = 0.0005f + 0.06f * (float)(k + 1) / OSC_MAX;     /* ~24 Hz .. 3 kHz */
+        a.inc[k] = (uint32_t)(dt * 4294967296.0f);
+        a.dt[k] = dt;
+        a.idt[k] = 1.0f / dt;
+        a.gl[k] = 0.3f + 0.1f * (float)k;
+        a.gr[k] = 1.0f - a.gl[k];
+    }
+    b = a;
+    float l1[64] = { 0 }, r1[64] = { 0 }, l2[64] = { 0 }, r2[64] = { 0 };
+    float maxd = 0.0f;
+    for (int blk = 0; blk < 8; blk++) {                 /* several blocks: phase wraps, BLEP edges */
+        for (int i = 0; i < 64; i++) l1[i] = r1[i] = l2[i] = r2[i] = 0.0f;
+        osc_bank_scalar(&a, 0.6f, 64, l1, r1);
+        osc_bank_rvv(&b, 0.6f, 64, l2, r2);
+        for (int i = 0; i < 64; i++) {
+            float d = l1[i] - l2[i], e = r1[i] - r2[i];
+            if (d < 0) d = -d;
+            if (e < 0) e = -e;
+            if (d > maxd) maxd = d;
+            if (e > maxd) maxd = e;
+        }
+        for (int k = 0; k < OSC_MAX; k++)
+            if (a.ph[k] != b.ph[k]) maxd = 1e9f;            /* phase bookkeeping must match */
+    }
+    uart_puts("simd: self-test max |scalar - rvv| = ");
+    uart_put_dec((uint64_t)(maxd * 1e9f));
+    uart_puts("e-9 -> ");
+    int pass = maxd < 1e-4f;
+    uart_puts(pass ? "PASS\n" : "FAIL\n");
+    return pass;
+}
+
+static void print_profile(void)
+{
+    engine_profile_t p;
+    engine_profile_take(&p);
+    if (!p.frames) return;
+    uint64_t blocks = p.frames / 64 ? p.frames / 64 : 1;
+#define US(x) ((x) * 1000000ull / BOARD_TIMEBASE_HZ / blocks)
+    uart_puts("prof (us/64-frame block, ");
+    uart_puts(engine_simd() ? "rvv" : "scalar");
+    uart_puts("): osc "); uart_put_dec(US(p.osc));
+    uart_puts("  voice "); uart_put_dec(US(p.voice));
+    uart_puts("  chorus "); uart_put_dec(US(p.chorus));
+    uart_puts("  delay "); uart_put_dec(US(p.delay));
+    uart_puts("  reverb "); uart_put_dec(US(p.reverb));
+    uart_puts("  total "); uart_put_dec(US(p.total));
+    uart_putc('\n');
+#undef US
+}
+
 static uint64_t render_load_pct(void)
 {
     /* 64 frames at 48 kHz = 1333 us = BOARD_TIMEBASE_HZ / 750 ticks */
@@ -148,7 +214,17 @@ void main(uint64_t hartid, uint64_t fdt)
 
 #ifdef BOARD_HAS_SPI_LINK
     __asm__ volatile("csrs sstatus, %0" :: "r"(1u << 13));   /* FS=Initial: float in main loop */
+    vec_init();
+    uart_puts("simd: vector unit ");
+    uart_puts(vec_ok() ? "ok, VLEN " : "unavailable (");
+    if (vec_ok()) { uart_put_dec((uint64_t)vec_vlen_bits()); uart_puts(", "); }
+    uart_puts(vec_how());
+    uart_puts(vec_ok() ? "\n" : ")\n");
     engine_init(48000.0f);             /* latches a D2+A2 drone */
+    engine_set_timer(now_ticks);
+    engine_set_simd(simd_selftest());  /* RVV kernels only if they match scalar */
+    uart_puts(engine_simd() ? "simd: engine using RVV kernels ('v' toggles)\n"
+                            : "simd: engine using scalar kernels\n");
     ui_init();
     audio_link_set_render(render_block);
     if (audio_link_init() == 0) {
@@ -250,6 +326,7 @@ void main(uint64_t hartid, uint64_t fdt)
             uart_put_dec(render_load_pct()); uart_puts("%, voices ");
             uart_put_dec((uint64_t)engine_voices_active()); uart_putc('\n');
             ui_set_load((int)render_load_pct());
+            print_profile();
             render_max_ticks = 0;
             uart_puts("dma: "); uart_puts(audio_link_dma_active() ? "on" : "off");
             uart_puts(" frames "); uart_put_dec(l->dma_frames);
@@ -284,6 +361,12 @@ void main(uint64_t hartid, uint64_t fdt)
                 continue;
             }
 #ifdef BOARD_HAS_SPI_LINK
+            if (c == 'v') {                        /* RVV <-> scalar kernels (A/B timing) */
+                engine_set_simd(!engine_simd() && vec_ok());
+                uart_puts(engine_simd() ? "simd: RVV kernels\n" : "simd: scalar kernels\n");
+                continue;
+            }
+            if (c == 'x') { simd_selftest(); continue; }
             if (c == 'w') {                        /* M7: worst-case load, 4 voices x 7 osc */
                 uint8_t cc[3] = { 0xB0, 20 + P_OSCS, 127 };
                 ui_midi(cc, 3, 0);

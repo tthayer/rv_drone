@@ -1,5 +1,6 @@
 /* Trap dispatcher. Interrupts stay off inside (SIE cleared by trap entry). */
 #include "trap.h"
+#include "vec.h"
 #include "uart.h"
 #include "timer.h"
 #include "plic.h"
@@ -39,5 +40,7 @@ void trap_handler(struct trap_frame *f)
     }
     else if (f->scause == EXC_ILLEGAL && cache_probe_trap(f))
         return;                          /* T-Head CMO not enabled: probe in cache_init() */
+    else if (f->scause == EXC_ILLEGAL && vec_probe_trap(f))
+        return;                          /* vector unit off: probe in vec_init() */
     fatal(f);
 }

@@ -55,10 +55,13 @@ static void wav_header(FILE *f, uint32_t frames) {
     fwrite(&bits, 2, 1, f); fwrite("data", 1, 4, f); fwrite(&data, 4, 1, f);
 }
 
+static uint64_t host_ticks(void) { return SDL_GetPerformanceCounter(); }
+
 static int offline(int argc, char **argv) {
     const char *path = NULL, *notes = NULL;
     double secs = 20, clock_bpm = 0;
     engine_init(SR);
+    engine_set_timer(host_ticks);
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--wav") && i + 1 < argc) path = argv[++i];
         else if (!strcmp(argv[i], "--seconds") && i + 1 < argc) secs = atof(argv[++i]);
@@ -121,6 +124,11 @@ static int offline(int argc, char **argv) {
                20 * log10(sqrt(sum2[c] / total) + 1e-12), dc[c] / total);
     printf("non-finite samples %ld; host render %.1f us/block of 64 (%.2f%% of real time)\n",
            nonfinite, render_s / (total / 64.0) * 1e6, 100 * render_s / secs);
+    engine_profile_t pf;
+    engine_profile_take(&pf);
+    double us = 1e6 / (double)SDL_GetPerformanceFrequency() / (pf.frames / 64.0);
+    printf("profile (host us/64-frame block): osc %.2f  voice %.2f  chorus %.2f  delay %.2f  reverb %.2f  total %.2f\n",
+           pf.osc * us, pf.voice * us, pf.chorus * us, pf.delay * us, pf.reverb * us, pf.total * us);
     return nonfinite != 0;
 }
 

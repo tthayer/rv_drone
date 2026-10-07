@@ -20,13 +20,20 @@ LDFLAGS := -nostdlib -static -Wl,-T,src/boot/link.ld -Wl,-Map,$(NAME).map -Wl,--
 
 SRCS := src/boot/start.S src/boot/trap.S src/hal/uart.c src/hal/trap.c \
        src/hal/timer.c src/hal/plic.c src/hal/reset.c src/hal/cache.c src/hal/dma.c src/app/main.c \
-       src/engine/engine.c src/engine/params.c src/ui/ui.c
+       src/engine/engine.c src/engine/osc.c src/engine/params.c src/ui/ui.c src/hal/vec.c
 ifeq ($(BOARD),nano)
 SRCS += src/hal/pinmux.c src/hal/gpio.c src/hal/spi.c src/hal/sd.c src/fs/diskio.c src/app/preset_fs.c
 FATFS := third_party/fatfs/ff.c
 endif
 SRCS += src/drivers/audio_link.c src/drivers/panel_link.c src/app/panel_ui.c
 CSRCS := common/fb.c common/font5x7.c
+# RVV (XTheadVector) only for the files that use it; nowhere else gets vector code.
+ifeq ($(BOARD),nano)
+CFLAGS += -DENGINE_RVV
+VEC_CFLAGS := -march=rv64gc_xtheadvector
+$(BUILD)/engine/osc.c.o: CFLAGS += $(VEC_CFLAGS)
+$(BUILD)/hal/vec.c.o: CFLAGS += $(VEC_CFLAGS)
+endif
 OBJS := $(patsubst src/%,$(BUILD)/%.o,$(SRCS)) $(patsubst common/%,$(BUILD)/common/%.o,$(CSRCS)) \
         $(patsubst third_party/%,$(BUILD)/third_party/%.o,$(FATFS))
 
@@ -127,7 +134,7 @@ test-link:
 	build/link-test/test_link
 
 # Host emulator: engine + UI on macOS with SDL2 (window + audio, or --wav offline).
-EMU_SRCS := emu/main.c src/engine/engine.c src/engine/params.c src/ui/ui.c common/fb.c common/font5x7.c
+EMU_SRCS := emu/main.c src/engine/engine.c src/engine/osc.c src/engine/params.c src/ui/ui.c common/fb.c common/font5x7.c
 emu: build/emu/rv_drone_emu
 build/emu/rv_drone_emu: $(EMU_SRCS) $(wildcard src/engine/*.h src/ui/*.h common/*.h)
 	@mkdir -p build/emu
@@ -144,7 +151,7 @@ wiring:
 test-presets:
 	@mkdir -p build/emu
 	cc -std=gnu11 -O2 -Wall -Wextra -Isrc/engine -Isrc/ui -Icommon emu/test_presets.c \
-	   src/engine/engine.c src/engine/params.c src/ui/ui.c common/fb.c common/font5x7.c -o build/emu/test_presets
+	   src/engine/engine.c src/engine/osc.c src/engine/params.c src/ui/ui.c common/fb.c common/font5x7.c -o build/emu/test_presets
 	build/emu/test_presets
 
 # Offline render (20 s, default drone) + level/sanity stats.

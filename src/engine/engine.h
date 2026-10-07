@@ -25,6 +25,22 @@ void  engine_clock(int kind, uint32_t t_us);
 float engine_bpm(void);                       /* 0 = no clock in the last 0.5 s */
 int   engine_clock_running(void);             /* between Start/Continue and Stop */
 
+/* Per-stage render time, in the timer's ticks, accumulated since the last take.
+ * osc = oscillator banks; voice = sub + filter + drive + envelope; then the
+ * effect passes; total = whole engine_render(), frames = frames rendered. */
+typedef struct {
+    uint64_t osc, voice, chorus, delay, reverb, total;
+    uint32_t frames;
+} engine_profile_t;
+void engine_set_timer(uint64_t (*now)(void));      /* NULL = no profiling */
+void engine_profile_take(engine_profile_t *out);  /* copy and reset */
+
+/* Vector kernels (RVV / XTheadVector, Nano build only). Returns the new state:
+ * stays 0 when the engine was built without ENGINE_RVV. Main-loop context only:
+ * the trap entry saves neither FP nor vector registers. */
+int   engine_set_simd(int on);
+int   engine_simd(void);
+
 /* n frames of stereo float, roughly +-1. Any n; internally 32-frame control blocks. */
 void  engine_render(float *left, float *right, int n);
 #endif

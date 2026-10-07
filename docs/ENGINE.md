@@ -10,6 +10,7 @@ describes what it does, how it is driven, and how it runs on the Nano.
 |---|---|
 | `src/engine/engine.c`, `engine.h` | voices, filter, effects, MIDI clock follower, `engine_render()` |
 | `src/engine/params.c`, `params.h` | the parameter table: ranges, curves, units, formatting, CC map, clock divisions |
+| `src/engine/osc.c`, `osc.h` | oscillator-bank kernels: scalar and RVV (XTheadVector), same math |
 | `src/engine/dsp.h` | libm-free math: `dsp_exp2`, `dsp_mtof`, `dsp_sin1`, `dsp_tanh`, `dsp_noise`, `dsp_flush` |
 | `src/ui/ui.c` | encoder pages, MIDI routing, presets, display drawing; calls into the engine |
 | `src/app/main.c` (`render_block`) | Nano glue: renders one rvlink block, converts it to 24-bit, measures the time it takes |
@@ -59,6 +60,10 @@ into control blocks internally.
 
 ### Oscillator bank
 
+- **Kernel:** each voice's bank renders a whole control block into stereo
+  buffers in one call (`osc_bank_scalar` or `osc_bank_rvv`). Phases are 32-bit
+  fixed point (2^32 = one cycle), so wrapping is exact and costs nothing, and
+  sample i's phase is `ph + i·inc`, which is easy to vectorise.
 - **Oscillator count:** OSCS, 3 to 7 per voice.
 - **Detune:** the oscillators are spread linearly across ±DETUNE cents. Each
   one also has its own **drift LFO**: a sine of ±(DRIFT × 10) cents at a
@@ -248,6 +253,51 @@ doesn't break older files.
   Feedback paths flush values below 1e-15 to zero (`dsp_flush`), so
   denormals can't build up.
 
+## SIMD (RVV) and profiling
+
+- **Vector unit:** the C906 implements RVV **0.7.1** (T-Head "XTheadVector",
+  VLEN 128). GCC 16 targets it with `-march=rv64gc_xtheadvector` and the
+  standard `__riscv_*` intrinsics, which compile to `th.v*` instructions. It
+  does **not** auto-vectorise for this target, so vector code is written by hand.
+  Only `src/engine/osc.c` and `src/hal/vec.c` are compiled with that `-march`
+  (Makefile, `BOARD=nano`), so no other code can pick up vector instructions.
+- **Enabling it:** `vec_init()` (`src/hal/vec.c`) runs at boot.
+  - It tries `th.vsetvli`, catching the illegal-instruction trap.
+  - If that traps, it sets the vector-state field in `sstatus`, first at
+    T-Head's position (bits 24:23), then at the RVV 1.0 position (bits 10:9),
+    and retries.
+  - The console reports the result (`simd: vector unit ok, VLEN 128, …`).
+- **Self-test before use:** at boot the Nano runs the scalar and RVV
+  oscillator kernels on the same random 7-oscillator bank for 8 blocks and
+  compares them. The RVV kernel is used only if the largest difference is under
+  1e-4 and the phases match exactly. Otherwise the engine stays scalar.
+- **The same rule as FP:** the trap entry saves no vector registers, so vector
+  code runs only in main-loop context.
+- **Profiling:** `engine_set_timer()` gives the engine a tick source (`rdtime`
+  on the Nano, the SDL performance counter in emu). The engine then accumulates
+  time per stage:
+  - **osc:** the oscillator banks;
+  - **voice:** sub-oscillator, filter, drive and envelope;
+  - **chorus**, **delay** and **reverb**;
+  - **total.**
+
+  The Nano prints a `prof (us/64-frame block, rvv|scalar): …` line every
+  second, and `emu --wav` prints the same breakdown for the host.
+- **Host reference** (Apple M4, clang `-O2`, where the scalar kernels are
+  auto-vectorised), worst case 4 voices × 7 oscillators, in µs per block:
+
+  | osc | voice | chorus | delay | reverb | total |
+  |---|---|---|---|---|---|
+  | 1.33 | 1.61 | 0.46 | 0.20 | 0.55 | 4.89 |
+
+  The C906 figures are still to be measured. Compare them with the console's
+  `v` key, which switches between the scalar and RVV kernels.
+- **Status:** the RVV oscillator kernel is written, compiles to T-Head vector
+  instructions, and is guarded by the probe and the self-test. It **has not
+  yet run on hardware.** The next candidate is the voice path: 8 filter lanes
+  (4 voices × 2 channels) per sample in one vector op. Whether to do it
+  depends on the C906 profile.
+
 ## Working on the engine
 
 - **Listen on the Mac:** `make emu`, then `build/emu/rv_drone_emu`. The mouse
@@ -268,4 +318,6 @@ doesn't break older files.
 - **Tests:** `make test-presets` runs a preset round trip through the UI and
   engine.
 - **Measure on hardware:** console `w` sets up the worst-case load. The
-  console's `engine:` line shows the render time.
+  console's `engine:` and `prof` lines show the render time, overall and per
+  stage. `v` switches between the scalar and RVV kernels; `x` reruns the
+  kernel self-test.

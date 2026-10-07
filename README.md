@@ -245,8 +245,10 @@ encoder 3 to save. Insert or remove the card only with the power off.
 
 ## Nano console commands
 
-UART0, 115200 8N1. The Nano prints link, panel, engine and DMA statistics once
-a second.
+UART0, 115200 8N1. Once a second the Nano prints link, panel, engine and DMA
+statistics, plus a `prof` line with the render time per stage (oscillators,
+voice, chorus, delay, reverb). At boot it reports the vector unit and the
+result of the kernel self-test (`simd: ...`).
 
 | Key | Action |
 |---|---|
@@ -255,6 +257,8 @@ a second.
 | `t` | force one link transfer (scope trigger) |
 | `p` | toggle the M4 test pattern ↔ engine audio |
 | `w` | worst-case CPU load: OSCS 7, four voices latched |
+| `v` | engine kernels RVV ↔ scalar (A/B timing; RVV only if the boot self-test passed) |
+| `x` | rerun the scalar-vs-RVV kernel self-test |
 | `i` | SD card and volume info |
 | `F` `F` (within 3 s) | format the SD card (erases it) |
 | `S` / `L` | save / load preset slot 1 |

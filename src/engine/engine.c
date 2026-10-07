@@ -1,7 +1,8 @@
 #include "engine.h"
 #include "dsp.h"
+#include "osc.h"
 
-#define MAX_OSC     7
+#define MAX_OSC     OSC_MAX
 #define CTRL        32                  /* control-rate block */
 #define DLY_N       131072              /* > 2 s at 48 kHz, power of 2 */
 #define CHO_N       2048
@@ -14,9 +15,9 @@ typedef struct {
     int note;                           /* -1 = unused */
     int gate;
     float env, env_target, env_coef;
-    float phase[MAX_OSC], inc[MAX_OSC], gl[MAX_OSC], gr[MAX_OSC];
+    osc_bank_t bank;
     float drift_ph[MAX_OSC], drift_rate[MAX_OSC];
-    float sub_ph, sub_inc;
+    uint32_t sub_ph, sub_inc;
     float lfo_ph;
     svf_t f[2];
     uint32_t age;
@@ -52,6 +53,10 @@ static struct {
     float beat_pos;                     /* beats since Start, follows clk_ticks */
     uint32_t clk_age;                   /* samples since the last tick */
     int clk_running;
+    /* SIMD + profiling */
+    int simd;
+    uint64_t (*now)(void);
+    engine_profile_t prof;
 } E;
 
 #define CLK_WRAP_BEATS 96               /* multiple of every division (<= 32 beats) */
@@ -132,7 +137,7 @@ static void voice_start(voice_t *v, int note)
     v->age = ++E.age;
     if (v->env < 1e-4f) {                          /* fresh voice: new random phases */
         for (int k = 0; k < MAX_OSC; k++) {
-            v->phase[k] = 0.5f + 0.5f * dsp_noise(&E.rng);
+            v->bank.ph[k] = (uint32_t)(int32_t)(dsp_noise(&E.rng) * 2147483647.0f);
             v->drift_ph[k] = 0.5f + 0.5f * dsp_noise(&E.rng);
             v->drift_rate[k] = 0.05f + 0.12f * (0.5f + 0.5f * dsp_noise(&E.rng));
         }
@@ -201,13 +206,6 @@ void engine_init(float sr)
     E.held = 0;
 }
 
-static inline float polyblep(float t, float dt)
-{
-    if (t < dt) { t /= dt; return t + t - t * t - 1.0f; }
-    if (t > 1.0f - dt) { t = (t - 1.0f) / dt; return t * t + t + t + 1.0f; }
-    return 0.0f;
-}
-
 /* Control-rate update of one voice: increments, pans, envelope coefficient. */
 static void voice_control(voice_t *v, int nosc)
 {
@@ -220,15 +218,19 @@ static void voice_control(voice_t *v, int nosc)
         v->drift_ph[k] += v->drift_rate[k] * (float)CTRL * E.inv_sr;
         if (v->drift_ph[k] >= 1.0f) v->drift_ph[k] -= 1.0f;
         float cents = det * pos + drift * dsp_sin1(v->drift_ph[k]);
-        v->inc[k] = f0 * dsp_exp2(cents * (1.0f / 1200.0f)) * E.inv_sr;
-        if (v->inc[k] > 0.45f) v->inc[k] = 0.45f;
+        float dt = f0 * dsp_exp2(cents * (1.0f / 1200.0f)) * E.inv_sr;
+        if (dt > 0.45f) dt = 0.45f;
+        v->bank.inc[k] = (uint32_t)(dt * 4294967296.0f);
+        v->bank.dt[k] = dt;
+        v->bank.idt[k] = 1.0f / dt;
         /* alternate sides so neighbours in pitch sit apart; equal power */
         float pan = spread * ((k & 1) ? pos : -pos);
         float a = (pan + 1.0f) * 0.125f;                                /* 0..0.25 */
-        v->gl[k] = dsp_sin1(0.25f - a);
-        v->gr[k] = dsp_sin1(a);
+        v->bank.gl[k] = dsp_sin1(0.25f - a);
+        v->bank.gr[k] = dsp_sin1(a);
     }
-    v->sub_inc = f0 * 0.5f * E.inv_sr;
+    v->bank.n = nosc;
+    v->sub_inc = (uint32_t)(f0 * 0.5f * E.inv_sr * 4294967296.0f);
     v->env_target = v->gate ? 1.0f : 0.0f;
     v->env_coef = coef_for_time(v->gate ? E.p[P_ATTACK] : E.p[P_RELEASE], E.sr);
 }
@@ -290,24 +292,21 @@ static void render_block(float *outl, float *outr, int n)
         float g = dsp_sin1(w) / dsp_sin1(0.25f - w);
         float a1 = 1.0f / (1.0f + g * (g + k_damp)), a2 = g * a1, a3 = g * a2;
 
+        /* oscillator bank for the whole block, then the per-sample voice path */
+        float bl[CTRL], br[CTRL];
+        for (int i = 0; i < n; i++) bl[i] = br[i] = 0.0f;
+        uint64_t t0 = E.now ? E.now() : 0;
+#ifdef ENGINE_RVV
+        if (E.simd) osc_bank_rvv(&v->bank, shape, n, bl, br);
+        else
+#endif
+        osc_bank_scalar(&v->bank, shape, n, bl, br);
+        uint64_t t1 = E.now ? E.now() : 0;
         for (int i = 0; i < n; i++) {
-            float l = 0, r = 0;
-            for (int k = 0; k < nosc; k++) {
-                float t = v->phase[k], dt = v->inc[k];
-                float saw = 2.0f * t - 1.0f - polyblep(t, dt);
-                float sn = dsp_sin1(t);
-                float s = sn + shape * (saw - sn);
-                l += s * v->gl[k];
-                r += s * v->gr[k];
-                t += dt;
-                if (t >= 1.0f) t -= 1.0f;
-                v->phase[k] = t;
-            }
-            float sb = sub * dsp_sin1(v->sub_ph) * 1.2f;
+            float sb = sub * dsp_sin1((float)v->sub_ph * (1.0f / 4294967296.0f)) * 1.2f;
             v->sub_ph += v->sub_inc;
-            if (v->sub_ph >= 1.0f) v->sub_ph -= 1.0f;
-            l = l * norm + sb;
-            r = r * norm + sb;
+            float l = bl[i] * norm + sb;
+            float r = br[i] * norm + sb;
             /* TPT SVF per channel */
             float in[2] = { l, r }, out[2];
             for (int c = 0; c < 2; c++) {
@@ -323,6 +322,10 @@ static void render_block(float *outl, float *outr, int n)
             float gn = v->env * drive_out;
             outl[i] += dsp_tanh(out[0] * drive) * gn;
             outr[i] += dsp_tanh(out[1] * drive) * gn;
+        }
+        if (E.now) {
+            E.prof.osc += t1 - t0;
+            E.prof.voice += E.now() - t1;
         }
         if (!v->gate && v->env < 1e-4f) { v->env = 0; v->note = -1; }
         v->f[0].ic1 = dsp_flush(v->f[0].ic1); v->f[0].ic2 = dsp_flush(v->f[0].ic2);
@@ -347,10 +350,10 @@ static void render_block(float *outl, float *outr, int n)
     if (E.cho_ph >= 1.0f) E.cho_ph -= 1.0f;
     float vol_t = E.p[P_VOLUME] * E.p[P_VOLUME];
 
+    uint64_t t0 = E.now ? E.now() : 0;
+    /* chorus pass */
     for (int i = 0; i < n; i++) {
         float l = outl[i] * 0.45f, r = outr[i] * 0.45f;
-
-        /* chorus */
         E.cho_l[E.cho_w & (CHO_N - 1)] = l;
         E.cho_r[E.cho_w & (CHO_N - 1)] = r;
         float ph = E.cho_ph + (float)i * 0.23f * E.inv_sr;
@@ -360,10 +363,13 @@ static void render_block(float *outl, float *outr, int n)
         float wl2 = tap(E.cho_l, CHO_N - 1, E.cho_w, dr * 1.37f);
         float wr2 = tap(E.cho_r, CHO_N - 1, E.cho_w, dl * 1.37f);
         E.cho_w++;
-        l += cmix * 0.6f * (wl + wr2);
-        r += cmix * 0.6f * (wr + wl2);
-
-        /* feedback delay, cross-fed (ping-pong-ish), damped, smoothed time */
+        outl[i] = l + cmix * 0.6f * (wl + wr2);
+        outr[i] = r + cmix * 0.6f * (wr + wl2);
+    }
+    uint64_t t1 = E.now ? E.now() : 0;
+    /* feedback delay pass: cross-fed (ping-pong-ish), damped, smoothed time */
+    for (int i = 0; i < n; i++) {
+        float l = outl[i], r = outr[i];
         E.dly_s += (dly_target - E.dly_s) * 0.0005f;
         float yl = tap(E.dly_l, DLY_N - 1, E.dly_w, E.dly_s);
         float yr = tap(E.dly_r, DLY_N - 1, E.dly_w, E.dly_s);
@@ -372,10 +378,13 @@ static void render_block(float *outl, float *outr, int n)
         E.dly_l[E.dly_w & (DLY_N - 1)] = dsp_flush(l + dfb * E.dly_lp_r);
         E.dly_r[E.dly_w & (DLY_N - 1)] = dsp_flush(r + dfb * E.dly_lp_l);
         E.dly_w++;
-        l += dmix * yl;
-        r += dmix * yr;
-
-        /* FDN reverb: 8 lines, Hadamard feedback, per-line damping */
+        outl[i] = l + dmix * yl;
+        outr[i] = r + dmix * yr;
+    }
+    uint64_t t2 = E.now ? E.now() : 0;
+    /* FDN reverb pass (8 lines, Hadamard feedback, per-line damping) + output */
+    for (int i = 0; i < n; i++) {
+        float l = outl[i], r = outr[i];
         float x[REV_LINES];
         for (int j = 0; j < REV_LINES; j++) {
             float y = E.rev[j][(E.rev_w - E.rev_lenI[j]) & (REV_N - 1)];
@@ -396,10 +405,15 @@ static void render_block(float *outl, float *outr, int n)
         E.rev_w++;
         l += rmix * wetl * 0.35f;
         r += rmix * wetr * 0.35f;
-
         E.vol_s += (vol_t - E.vol_s) * 0.001f;
         outl[i] = dsp_tanh(l * E.vol_s * 1.5f);
         outr[i] = dsp_tanh(r * E.vol_s * 1.5f);
+    }
+    if (E.now) {
+        uint64_t t3 = E.now();
+        E.prof.chorus += t1 - t0;
+        E.prof.delay += t2 - t1;
+        E.prof.reverb += t3 - t2;
     }
     for (int j = 0; j < REV_LINES; j++) E.rev_lp[j] = dsp_flush(E.rev_lp[j]);
     E.dly_lp_l = dsp_flush(E.dly_lp_l);
@@ -408,6 +422,8 @@ static void render_block(float *outl, float *outr, int n)
 
 void engine_render(float *l, float *r, int n)
 {
+    uint64_t t0 = E.now ? E.now() : 0;
+    int frames = n;
     while (n > 0) {
         int m = n < CTRL ? n : CTRL;
         render_block(l, r, m);
@@ -415,7 +431,32 @@ void engine_render(float *l, float *r, int n)
         r += m;
         n -= m;
     }
+    if (E.now) {
+        E.prof.total += E.now() - t0;
+        E.prof.frames += (uint32_t)frames;
+    }
 }
+
+void engine_set_timer(uint64_t (*now)(void)) { E.now = now; }
+
+void engine_profile_take(engine_profile_t *out)
+{
+    *out = E.prof;
+    E.prof = (engine_profile_t){ 0 };
+}
+
+int engine_set_simd(int on)
+{
+#ifdef ENGINE_RVV
+    E.simd = on != 0;
+#else
+    (void)on;
+    E.simd = 0;
+#endif
+    return E.simd;
+}
+
+int engine_simd(void) { return E.simd; }
 
 _Static_assert(ENGINE_CLK_TICK == 0 && ENGINE_CLK_START == 1 && ENGINE_CLK_CONTINUE == 2 &&
                ENGINE_CLK_STOP == 3, "engine clock kinds must match RVPANEL_CLK_*");
