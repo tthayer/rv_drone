@@ -4,12 +4,14 @@
 //     mouse wheel over a display half = that encoder, click = its switch
 //     z s x d c v g b h n j m ,       = notes C..C (piano layout), up/down = octave
 //     space = all notes off, esc = quit
+//     presets: page 5 (enc 1 push to reach it); files in build/emu/presets
 //   rv_drone_emu --wav out.wav [--seconds N] [--notes 38,45,...] [--set ID=VAL ...]
 //     offline render to a 16-bit stereo WAV, then level stats and render speed.
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #include <SDL.h>
 
@@ -114,6 +116,28 @@ static int offline(int argc, char **argv) {
     return nonfinite != 0;
 }
 
+// Preset store: plain files in build/emu/presets (the Nano uses /presets on SD).
+#define EMU_PRESET_DIR "build/emu/presets"
+static int emu_read(const char *name, char *buf, int max) {
+    char p[256];
+    snprintf(p, sizeof p, EMU_PRESET_DIR "/%s", name);
+    FILE *f = fopen(p, "rb");
+    if (!f) return -2;
+    int n = (int)fread(buf, 1, (size_t)max, f);
+    fclose(f);
+    return n;
+}
+static int emu_write(const char *name, const char *buf, int len) {
+    char p[256];
+    mkdir("build", 0755); mkdir("build/emu", 0755); mkdir(EMU_PRESET_DIR, 0755);
+    snprintf(p, sizeof p, EMU_PRESET_DIR "/%s", name);
+    FILE *f = fopen(p, "wb");
+    if (!f) return -1;
+    int ok = fwrite(buf, 1, (size_t)len, f) == (size_t)len;
+    return fclose(f) == 0 && ok ? 0 : -1;
+}
+static const ui_store_t emu_store = { emu_read, emu_write };
+
 static const SDL_Keycode piano[] = { SDLK_z, SDLK_s, SDLK_x, SDLK_d, SDLK_c, SDLK_v, SDLK_g,
                                      SDLK_b, SDLK_h, SDLK_n, SDLK_j, SDLK_m, SDLK_COMMA };
 
@@ -135,6 +159,8 @@ int main(int argc, char **argv) {
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) != 0) { fprintf(stderr, "SDL: %s\n", SDL_GetError()); return 1; }
     engine_init(SR);
     ui_init();
+    ui_set_store(&emu_store);
+    ui_boot_preset();
 
     SDL_AudioSpec want = { .freq = SR, .format = AUDIO_F32SYS, .channels = 2, .samples = 256,
                            .callback = audio_cb }, have;

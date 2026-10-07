@@ -18,4 +18,18 @@ void ui_sw(int id, int down);                /* enc 1 push = next page, others =
 void ui_midi(const uint8_t *msg, int len, uint64_t now_ms);  /* one channel message */
 void ui_set_load(int cpu_pct);               /* shown in the header */
 void ui_draw(int display, fb_t *fb, uint64_t now_ms);
+
+/* Presets (page 5, PRESET): enc 1 turn = slot 1..16, enc 2 push = load,
+ * enc 3 push = save. Files are text, one NAME=position (0..10000) per line,
+ * named P01.TXT..P16.TXT; LAST.TXT holds the slot to load at boot. The store
+ * maps names to files (FatFs /presets on the Nano, a directory in emu). */
+typedef struct {
+    int (*read)(const char *name, char *buf, int max);       /* bytes read, or <0 */
+    int (*write)(const char *name, const char *buf, int len); /* 0, or <0 */
+} ui_store_t;
+#define UI_PRESET_SLOTS 16
+void ui_set_store(const ui_store_t *store);
+int  ui_preset_load(int slot);     /* 0 ok, -1 no store/card, -2 empty, -3 bad file */
+int  ui_preset_save(int slot);     /* 0 ok, <0 error */
+void ui_boot_preset(void);         /* loads the LAST.TXT slot, if any */
 #endif

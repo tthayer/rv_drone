@@ -64,4 +64,10 @@
 #define BOARD_FMUX_UART2_TX 0x70
 #define BOARD_FMUX_UART2_RX 0x74
 #define BOARD_FMUX_UART2_FN 2
+/* M8: SD0 slot (microSD), DWC MSHC = standard SDHCI + vendor regs at +0x200. SDK
+ * cv181x_base.dtsi sd@04310000 (src-frequency 375 MHz), linux sdhci-cv181x.c/.h
+ * (pads, pulls, PWRSW, PHY defaults), clk-cv181x.c (CLK_EN_0 bits 18-20). */
+#define BOARD_HAS_SD        1
+#define BOARD_SD_BASE       0x04310000UL
+#define BOARD_SD_BASE_HZ    375000000UL
 #endif

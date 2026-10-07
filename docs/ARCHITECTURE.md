@@ -529,7 +529,24 @@ Behaviour:
   - Encoders: 4 quadrature counts per click on all six (`UI_COUNTS_PER_DETENT`).
   - Audio noise/dropouts were a ground loop through the laptop charger
     (cleared on battery); not the PCM5102A module.
-- **Next: M8** — SDHCI + FatFs presets.
+- **M8 (in progress, 2026-10-06):** SD + FatFs presets.
+  - `src/hal/sd.c`: polled SDHCI on SD0 (0x04310000, DWC MSHC). Setup per the
+    vendor Linux driver: CLK_EN_0 bits 18–20, pads func 0 + pulls (FMUX
+    0x900/0xA00–0xA14), SD_PWRSW_CTRL (0x030001F4) = 3.3 V, MSHC_CTRL /
+    PHY_TX_RX_DLY / PHY_CONFIG defaults after each reset. Base clock 375 MHz
+    assumed (DTS); identify at 400 kHz, then 4-bit at 23.4 MHz. SD0_PWR_EN
+    stays the LED GPIO; the card works with it (card VDD is not gated by it).
+    Long waits call an idle hook = `audio_link_poll`, so saves don't starve
+    Pico A (0 underruns across a save).
+  - FatFs R0.15a (`tools/get-vendor.sh`, checksummed; config `src/fs/ffconf.h`:
+    mkfs on, 8.3 names, no RTC), `src/fs/diskio.c`, `src/app/preset_fs.c`.
+  - Presets: `/presets/P01.TXT`..`P16.TXT`, text `NAME=position` (0..10000)
+    per line, robust to parameter additions; `LAST.TXT` = slot loaded at
+    boot. UI page 5 PRESET: enc 1 turn = slot, enc 2 push = load, enc 3 push
+    = save. Console: `i` card info, `F` twice = format, `S`/`L` = slot 1.
+  - Verified: 32 GB SDHC detected and formatted (FAT32, one MBR partition),
+    save + load OK. Host: `make test-presets` round trip.
+  - Open: save → power cycle → restored at boot.
 
 **Optional:**
 - **Faster USB boot:** slim OpenSBI (generic platform with only the 8250,

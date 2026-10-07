@@ -14,7 +14,7 @@ BOARD_UP := $(shell echo $(BOARD) | tr a-z A-Z)
 
 CFLAGS  := -std=c11 -march=rv64gc -mabi=lp64d -mcmodel=medany -ffreestanding \
            -nostdlib -O2 -Wall -Wextra -Werror -ffunction-sections -fdata-sections \
-           -MMD -MP -DBOARD_$(BOARD_UP) -Isrc/board -Isrc/hal -Isrc/boot -Isrc/drivers -Isrc/engine -Isrc/ui -Icommon -Isrc/libc $(EXTRA_CFLAGS)
+           -MMD -MP -DBOARD_$(BOARD_UP) -Isrc/board -Isrc/hal -Isrc/boot -Isrc/drivers -Isrc/engine -Isrc/ui -Isrc/fs -Ithird_party/fatfs -Icommon -Isrc/libc $(EXTRA_CFLAGS)
 ASFLAGS := -march=rv64gc -mabi=lp64d -mcmodel=medany -DBOARD_$(BOARD_UP) -Wall -Werror
 LDFLAGS := -nostdlib -static -Wl,-T,src/boot/link.ld -Wl,-Map,$(NAME).map -Wl,--gc-sections -Wl,--no-warn-rwx-segments
 
@@ -22,11 +22,13 @@ SRCS := src/boot/start.S src/boot/trap.S src/hal/uart.c src/hal/trap.c \
        src/hal/timer.c src/hal/plic.c src/hal/reset.c src/hal/cache.c src/hal/dma.c src/app/main.c \
        src/engine/engine.c src/engine/params.c src/ui/ui.c
 ifeq ($(BOARD),nano)
-SRCS += src/hal/pinmux.c src/hal/gpio.c src/hal/spi.c
+SRCS += src/hal/pinmux.c src/hal/gpio.c src/hal/spi.c src/hal/sd.c src/fs/diskio.c src/app/preset_fs.c
+FATFS := third_party/fatfs/ff.c
 endif
 SRCS += src/drivers/audio_link.c src/drivers/panel_link.c src/app/panel_ui.c
 CSRCS := common/fb.c common/font5x7.c
-OBJS := $(patsubst src/%,$(BUILD)/%.o,$(SRCS)) $(patsubst common/%,$(BUILD)/common/%.o,$(CSRCS))
+OBJS := $(patsubst src/%,$(BUILD)/%.o,$(SRCS)) $(patsubst common/%,$(BUILD)/common/%.o,$(CSRCS)) \
+        $(patsubst third_party/%,$(BUILD)/third_party/%.o,$(FATFS))
 
 all: $(NAME).elf $(NAME).bin $(NAME).lst
 
@@ -36,6 +38,10 @@ $(BUILD)/%.c.o: src/%.c
 $(BUILD)/common/%.c.o: common/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
+# FatFs (vendor, fetched by tools/get-vendor.sh): our flags minus -Wextra.
+$(BUILD)/third_party/%.c.o: third_party/%.c src/fs/ffconf.h
+	@mkdir -p $(dir $@)
+	$(CC) $(filter-out -Wextra,$(CFLAGS)) -c $< -o $@
 $(BUILD)/%.S.o: src/%.S
 	@mkdir -p $(dir $@)
 	$(CC) $(ASFLAGS) -c $< -o $@
@@ -128,6 +134,13 @@ build/emu/rv_drone_emu: $(EMU_SRCS) $(wildcard src/engine/*.h src/ui/*.h common/
 	cc -std=gnu11 -O2 -Wall -Wextra -Werror -Isrc/engine -Isrc/ui -Icommon $(shell sdl2-config --cflags) \
 	   $(EMU_SRCS) $(shell sdl2-config --libs) -lm -o $@
 
+# Host test: preset save/load round trip through ui.c with an in-memory store.
+test-presets:
+	@mkdir -p build/emu
+	cc -std=gnu11 -O2 -Wall -Wextra -Isrc/engine -Isrc/ui -Icommon emu/test_presets.c \
+	   src/engine/engine.c src/engine/params.c src/ui/ui.c common/fb.c common/font5x7.c -o build/emu/test_presets
+	build/emu/test_presets
+
 # Offline render (20 s, default drone) + level/sanity stats.
 emu-wav: emu
 	build/emu/rv_drone_emu --wav build/emu/drone.wav --seconds 20
@@ -135,7 +148,7 @@ emu-wav: emu
 clean:
 	rm -rf build
 
-.PHONY: emu emu-wav all run-qemu opensbi fip usbboot pico pico-flash-audio pico-flash-panel test-panel test-link clean
+.PHONY: emu emu-wav test-presets all run-qemu opensbi fip usbboot pico pico-flash-audio pico-flash-panel test-panel test-link clean
 
 # Header dependencies (after all rules so 'all' stays the default goal).
 -include $(OBJS:.o=.d)

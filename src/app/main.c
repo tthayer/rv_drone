@@ -11,6 +11,8 @@
 #include "panel_ui.h"
 #include "engine.h"
 #include "ui.h"
+#include "preset_fs.h"
+#include "sd.h"
 #ifdef BOARD_HAS_SPI_LINK
 #include "spi.h"
 #endif
@@ -40,6 +42,16 @@ int memcmp(const void *a, const void *b, size_t n)
         if (*p != *q)
             return *p - *q;
     return 0;
+}
+
+char *strchr(const char *s, int c)
+{
+    for (;; s++) {
+        if (*s == (char)c)
+            return (char *)s;
+        if (!*s)
+            return 0;
+    }
 }
 
 size_t strlen(const char *s)
@@ -161,6 +173,15 @@ void main(uint64_t hartid, uint64_t fdt)
         uart_puts("m6: panel link unavailable\n");
     }
 
+#ifdef BOARD_HAS_SD
+    sd_set_idle_hook(audio_link_poll);         /* keep audio fed during SD waits */
+    ui_set_store(&preset_fs_store);
+    preset_fs_info();
+    ui_boot_preset();
+    uart_puts("m8: 'i' = SD info, 'F' twice = format card, 'S'/'L' = save/load slot 1\n");
+    uint64_t format_armed = 0;
+#endif
+
 #ifdef M1_FAULT_TEST
     (void)*(volatile uint32_t *)0;   /* load access fault -> trap dump */
 #endif
@@ -274,6 +295,31 @@ void main(uint64_t hartid, uint64_t fdt)
                     ui_midi(off, 3, 0);
                 }
                 uart_puts("engine: worst case (OSCS 7, 4 voices latched)\n");
+                continue;
+            }
+#endif
+#ifdef BOARD_HAS_SD
+            if (c == 'i') { preset_fs_info(); continue; }
+            if (c == 'S' || c == 'L') {
+                int r = c == 'S' ? ui_preset_save(1) : ui_preset_load(1);
+                uart_puts(c == 'S' ? "preset: save slot 1 -> " : "preset: load slot 1 -> ");
+                if (r < 0) { uart_putc('-'); r = -r; }
+                uart_put_dec((uint64_t)r);
+                uart_putc('\n');
+                continue;
+            }
+            if (c == 'F') {
+                if (format_armed && timer_ticks - format_armed < 3 * BOARD_TICK_HZ) {
+                    uart_puts("sd: formatting (erases the card)...\n");
+                    int r = preset_fs_format();
+                    uart_puts(r == 0 ? "sd: format ok\n" : "sd: format FAILED, code ");
+                    if (r) { if (r < 0) { uart_putc('-'); r = -r; } uart_put_dec((uint64_t)r); uart_putc('\n'); }
+                    preset_fs_info();
+                    format_armed = 0;
+                } else {
+                    format_armed = timer_ticks ? timer_ticks : 1;
+                    uart_puts("sd: press 'F' again within 3 s to ERASE the card\n");
+                }
                 continue;
             }
 #endif
