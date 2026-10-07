@@ -9,7 +9,8 @@ A bare-metal drone synthesizer on three boards:
 | Pico 2 W "B" (RP2350) | Front panel: 6 encoders, 3 SSD1306 OLEDs, MIDI in. Linked to the Nano by UART. |
 
 The design, pin maps, link protocols and milestones are in
-`docs/ARCHITECTURE.md`.
+`docs/ARCHITECTURE.md`; the drone engine (sound, parameters, MIDI/clock,
+CPU budget) is documented in `docs/ENGINE.md`.
 
 **Current state (2026-10-07):** M0–M7 are done on hardware; M8 (presets on
 SD) is working and awaiting its power-cycle test.

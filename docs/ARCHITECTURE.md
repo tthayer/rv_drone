@@ -414,8 +414,9 @@ Synthesis is `float` on the Nano. RVV 0.7.1 is a later optimisation.
 
 ## Drone engine
 
-Implemented in M7 (`src/engine/`); the sketch below is what it does, with
-these specifics: oscillators morph sine → polyBLEP saw (SHAPE), detune spread
+Implemented in M7 (`src/engine/`). **Full engine documentation: `docs/ENGINE.md`**
+(signal flow, parameters, clock follower, Nano integration, CPU/memory). Summary,
+with these specifics: oscillators morph sine → polyBLEP saw (SHAPE), detune spread
 across the bank plus ±10 cents of per-partial drift, a sine sub one octave
 down, a stereo TPT SVF per voice with a per-voice sine LFO on cutoff (up to
 ±3 octaves), a tanh-style saturator, then chorus (2 taps per side) → cross-fed

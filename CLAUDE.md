@@ -3,6 +3,7 @@
 ## Keep the docs and wiring diagrams current
 Whenever a change affects them, update the documentation **in the same commit**:
 
+- `docs/ENGINE.md`: engine behaviour, the parameter table (ranges, defaults, CCs), the clock follower, CPU and memory.
 - `docs/ARCHITECTURE.md`: pin tables, pinmux, runtime model, protocols, milestone status.
 - `README.md`: build, flash and wiring instructions.
 - `docs/wiring/system.yml` and `docs/wiring/panel.yml` (WireViz): any change to pins,
