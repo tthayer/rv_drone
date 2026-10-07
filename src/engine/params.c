@@ -1,10 +1,20 @@
 #include "params.h"
 #include "dsp.h"
 
-const char *const page_names[PAGE_COUNT] = { "OSC", "FILTER", "SPACE", "AMP" };
+const char *const page_names[PAGE_COUNT] = { "OSC", "FILTER", "SPACE", "AMP", "CLOCK" };
 
 static const char *const fmode_labels[] = { "LP", "BP" };
 static const char *const onoff_labels[] = { "OFF", "ON" };
+static const char *const sync_labels[] = { "OFF", "MIDI" };
+/* filter-LFO cycle length */
+static const char *const lfo_div_labels[] = { "FREE", "1/4", "1/2", "1 BT", "2 BT", "1 BAR", "2 BAR", "4 BAR", "8 BAR" };
+static const float lfo_div_beats[] = { 0, 0.25f, 0.5f, 1, 2, 4, 8, 16, 32 };
+/* delay time */
+static const char *const dly_div_labels[] = { "FREE", "1/16", "1/8", "1/8.", "1/4", "1/4.", "1/2" };
+static const float dly_div_beats[] = { 0, 0.25f, 0.5f, 0.75f, 1, 1.5f, 2 };
+
+float param_lfo_div_beats(int i) { return (i >= 0 && i < 9) ? lfo_div_beats[i] : 0.0f; }
+float param_dly_div_beats(int i) { return (i >= 0 && i < 7) ? dly_div_beats[i] : 0.0f; }
 
 static const param_desc_t table[P_COUNT] = {
     [P_DETUNE]     = { "DETUNE",  0.0f,   50.0f,   12.0f, CURVE_LIN,  UNIT_CENTS, 0, 0.01f },
@@ -31,6 +41,9 @@ static const param_desc_t table[P_COUNT] = {
     [P_TRANSPOSE]  = { "TRANSPOS", -24.0f, 24.0f,  0.0f,  CURVE_INT,  UNIT_ST,    0, 1.0f / 48.0f },
     [P_DAMP]       = { "DAMP",    0.0f,   1.0f,    0.5f,  CURVE_LIN,  UNIT_PCT,   0, 0.01f },
     [P_VOLUME]     = { "VOLUME",  0.0f,   1.0f,    0.7f,  CURVE_LIN,  UNIT_PCT,   0, 0.01f },
+    [P_SYNC]       = { "SYNC",    0.0f,   1.0f,    1.0f,  CURVE_ENUM, UNIT_NONE,  sync_labels, 0.5f },
+    [P_LFO_DIV]    = { "LFO DIV", 0.0f,   8.0f,    0.0f,  CURVE_ENUM, UNIT_NONE,  lfo_div_labels, 0.125f },
+    [P_DLY_DIV]    = { "DLY DIV", 0.0f,   6.0f,    0.0f,  CURVE_ENUM, UNIT_NONE,  dly_div_labels, 0.17f },
 };
 
 const param_desc_t *param_desc(int id) { return &table[id]; }

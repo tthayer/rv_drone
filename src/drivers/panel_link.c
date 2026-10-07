@@ -51,9 +51,9 @@ static volatile uint32_t ev_head, ev_tail;
 static uint8_t tx_buf[TX_N];
 static volatile uint32_t tx_head, tx_tail;
 
-static void push_event(uint8_t type, const uint8_t *p, size_t n)
+static void push_event(uint8_t type, const uint8_t *p, size_t n, uint32_t t)
 {
-    panel_event_t e = { type, 0, 0, 0, 0 };
+    panel_event_t e = { type, 0, 0, 0, 0, t };
     if (n > 0) e.a = p[0];
     if (n > 1) e.b = p[1];
     if (n > 2) e.c = p[2];
@@ -73,10 +73,17 @@ static void handle_packet(const uint8_t *buf, size_t plen)
     switch (buf[0]) {
     case RVPANEL_ENC:
     case RVPANEL_SW:
-        if (plen >= 2) push_event(buf[0], p, 2);
+        if (plen >= 2) push_event(buf[0], p, 2, 0);
         break;
     case RVPANEL_MIDI:
-        if (plen >= 4 && p[0] >= 1 && p[0] <= 3) push_event(buf[0], p, 4);
+        if (plen >= 4 && p[0] >= 1 && p[0] <= 3) push_event(buf[0], p, 4, 0);
+        break;
+    case RVPANEL_CLOCK:
+        if (plen >= 5) {
+            push_event(buf[0], p, 1, (uint32_t)p[1] | (uint32_t)p[2] << 8 |
+                                     (uint32_t)p[3] << 16 | (uint32_t)p[4] << 24);
+            st.clock_events++;
+        }
         break;
     case RVPANEL_STATUS:
         if (plen >= 10) {

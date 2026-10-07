@@ -2,6 +2,7 @@
 
 #include "hardware/gpio.h"
 #include "hardware/irq.h"
+#include "hardware/sync.h"
 #include "hardware/uart.h"
 
 #define NANO_UART       uart0
@@ -58,11 +59,20 @@ void nano_link_poll(const nano_link_handlers_t *h, uint32_t now_ms) {
     }
 }
 
+// Interrupts off for the whole packet: the MIDI IRQ sends CLOCK packets, and
+// two packets must never interleave on the wire. <= 16 B here: ~100 us.
 static void send(uint8_t type, const void *payload, unsigned len) {
     uint8_t w[RVPANEL_MAX_WIRE];
     size_t n = rvpanel_encode(type, payload, len, w);
-    uart_write_blocking(NANO_UART, w, n);       // <= 16 B here: ~100 us
+    uint32_t irq = save_and_disable_interrupts();
+    uart_write_blocking(NANO_UART, w, n);
     tx_packets++;
+    restore_interrupts(irq);
+}
+
+void nano_link_send_clock(unsigned kind, uint32_t t) {
+    uint8_t p[5] = { (uint8_t)kind, (uint8_t)t, (uint8_t)(t >> 8), (uint8_t)(t >> 16), (uint8_t)(t >> 24) };
+    send(RVPANEL_CLOCK, p, sizeof p);
 }
 
 void nano_link_send_enc(unsigned id, int32_t delta) {

@@ -7,8 +7,9 @@
  * TX: a ring drained from the 1 kHz tick and from panel_link_poll().
  * Boards without BOARD_HAS_PANEL_LINK (qemu): init returns -1, the rest no-ops. */
 typedef struct {
-    uint8_t type;            /* RVPANEL_ENC / _SW / _MIDI */
-    uint8_t a, b, c, d;      /* ENC: id, delta(i8) | SW: id, down | MIDI: len, bytes[3] */
+    uint8_t type;            /* RVPANEL_ENC / _SW / _MIDI / _CLOCK */
+    uint8_t a, b, c, d;      /* ENC: id, delta(i8) | SW: id, down | MIDI: len, bytes[3] | CLOCK: kind */
+    uint32_t t;              /* CLOCK: Pico B timestamp, us */
 } panel_event_t;
 
 typedef struct {
@@ -18,6 +19,7 @@ typedef struct {
     uint32_t peer_rx_ok;
     uint16_t peer_crc_err, peer_cobs_err, peer_dropped;
     uint32_t peer_status_count;
+    uint32_t clock_events;
 } panel_link_stats_t;
 
 int  panel_link_init(void);

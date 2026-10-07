@@ -32,6 +32,7 @@ void panel_ui_service(uint64_t now)
         switch (e.type) {
         case RVPANEL_ENC: ui_enc(e.a, (int8_t)e.b); break;
         case RVPANEL_SW:  ui_sw(e.a, e.b); break;
+        case RVPANEL_CLOCK: ui_clock(e.a, e.t); break;   /* RVPANEL_CLK_* == ENGINE_CLK_* */
         case RVPANEL_MIDI: {
             uint8_t m[3] = { e.b, e.c, e.d };
             ui_midi(m, e.a, now);

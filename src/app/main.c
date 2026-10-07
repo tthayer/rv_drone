@@ -241,7 +241,9 @@ void main(uint64_t hartid, uint64_t fdt)
             uart_puts(", crc "); uart_put_dec(p->peer_crc_err);
             uart_puts(", cobs "); uart_put_dec(p->peer_cobs_err);
             uart_puts(", drop "); uart_put_dec(p->peer_dropped);
-            uart_puts(")\n");
+            uart_puts(")  clock ev "); uart_put_dec(p->clock_events);
+            uart_puts(" bpm "); uart_put_dec((uint64_t)(engine_bpm() + 0.5f));
+            uart_puts(engine_clock_running() ? " run\n" : " stop\n");
             uart_puts("engine: render avg "); uart_put_dec(render_avg_us());
             uart_puts(" us  max "); uart_put_dec(render_max_ticks * 1000000ull / BOARD_TIMEBASE_HZ);
             uart_puts(" us per 64-frame block (budget 1333), load ");

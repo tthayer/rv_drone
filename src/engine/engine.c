@@ -42,9 +42,67 @@ static struct {
     float rev_lp[REV_LINES];
     uint32_t rev_lenI[REV_LINES];
     float rev_g[REV_LINES];
+    /* MIDI clock */
+    uint32_t clk_last_t;
+    int clk_have_last;
+    float clk_iv[24];                   /* last tick intervals, us */
+    int clk_iv_n, clk_iv_i;
+    float clk_period_us;                /* mean tick interval */
+    int32_t clk_ticks;                  /* since Start, wrapped at CLK_WRAP */
+    float beat_pos;                     /* beats since Start, follows clk_ticks */
+    uint32_t clk_age;                   /* samples since the last tick */
+    int clk_running;
 } E;
 
+#define CLK_WRAP_BEATS 96               /* multiple of every division (<= 32 beats) */
+
 static const float rev_base[REV_LINES] = { 1031, 1327, 1523, 1871, 2053, 2377, 2617, 2969 };
+
+void engine_clock(int kind, uint32_t t)
+{
+    switch (kind) {
+    case ENGINE_CLK_START:
+        E.clk_ticks = -1;               /* the next tick is beat 0 */
+        E.beat_pos = 0.0f;
+        E.clk_running = 1;
+        return;
+    case ENGINE_CLK_CONTINUE: E.clk_running = 1; return;
+    case ENGINE_CLK_STOP:     E.clk_running = 0; return;
+    }
+    if (E.clk_have_last) {
+        float iv = (float)(uint32_t)(t - E.clk_last_t);
+        if (iv > 2000.0f && iv < 250000.0f) {          /* 10..1250 BPM */
+            E.clk_iv[E.clk_iv_i] = iv;
+            E.clk_iv_i = (E.clk_iv_i + 1) % 24;
+            if (E.clk_iv_n < 24) E.clk_iv_n++;
+            float sum = 0;
+            for (int i = 0; i < E.clk_iv_n; i++) sum += E.clk_iv[i];
+            E.clk_period_us = sum / (float)E.clk_iv_n;
+        } else if (iv >= 250000.0f) {
+            E.clk_iv_n = 0;                            /* gap: start averaging afresh */
+        }
+    }
+    E.clk_last_t = t;
+    E.clk_have_last = 1;
+    E.clk_age = 0;
+    E.clk_ticks++;
+    if (E.clk_ticks >= CLK_WRAP_BEATS * 24) {
+        E.clk_ticks -= CLK_WRAP_BEATS * 24;
+        E.beat_pos -= (float)CLK_WRAP_BEATS;
+    }
+    /* pull the free-running beat position onto the tick grid */
+    float err = (float)E.clk_ticks * (1.0f / 24.0f) - E.beat_pos;
+    if (err > 1.0f || err < -1.0f) E.beat_pos += err;
+    else E.beat_pos += 0.25f * err;
+}
+
+static int clock_valid(void)
+{
+    return E.clk_period_us > 0.0f && E.clk_iv_n >= 4 && E.clk_age < (uint32_t)(E.sr * 0.5f);
+}
+
+float engine_bpm(void) { return clock_valid() ? 60.0e6f / (24.0f * E.clk_period_us) : 0.0f; }
+int engine_clock_running(void) { return E.clk_running; }
 
 static float coef_for_time(float seconds, float rate_hz)
 {
@@ -198,6 +256,17 @@ static void render_block(float *outl, float *outr, int n)
     float k_damp = 2.0f - 2.0f * E.p[P_RESO];
     float drive = 1.0f + 3.0f * E.p[P_DRIVE];
     float drive_out = 1.0f / (1.0f + E.p[P_DRIVE]);
+
+    /* clock: advance the beat position at the measured tempo */
+    E.clk_age += (uint32_t)n;
+    int synced = E.p[P_SYNC] >= 0.5f && clock_valid();
+    float beat_s = synced ? 24.0f * E.clk_period_us * 1e-6f : 0.0f;   /* seconds per beat */
+    if (synced) {
+        E.beat_pos += (float)n * E.inv_sr / beat_s;
+        if (E.beat_pos >= (float)CLK_WRAP_BEATS) E.beat_pos -= (float)CLK_WRAP_BEATS;
+    }
+    float lfo_beats = synced ? param_lfo_div_beats((int)E.p[P_LFO_DIV]) : 0.0f;
+    float dly_beats = synced ? param_dly_div_beats((int)E.p[P_DLY_DIV]) : 0.0f;
     int bp = E.p[P_FMODE] >= 0.5f;
 
     for (int i = 0; i < n; i++) outl[i] = outr[i] = 0.0f;
@@ -207,8 +276,14 @@ static void render_block(float *outl, float *outr, int n)
         if (v->note < 0 || (!v->gate && v->env < 1e-4f)) continue;
         voice_control(v, nosc);
         /* filter coefficients for this block */
-        v->lfo_ph += E.p[P_FMOD_RATE] * (1.0f + 0.13f * (float)vi) * (float)n * E.inv_sr;
-        if (v->lfo_ph >= 1.0f) v->lfo_ph -= 1.0f;
+        if (lfo_beats > 0.0f) {                       /* synced: phase from the beat */
+            float ph = E.beat_pos / lfo_beats + 0.25f * (float)vi;
+            v->lfo_ph = ph - (float)(int32_t)ph;
+            if (v->lfo_ph < 0.0f) v->lfo_ph += 1.0f;
+        } else {
+            v->lfo_ph += E.p[P_FMOD_RATE] * (1.0f + 0.13f * (float)vi) * (float)n * E.inv_sr;
+            if (v->lfo_ph >= 1.0f) v->lfo_ph -= 1.0f;
+        }
         float fc = E.cut_s * dsp_exp2(E.p[P_FMOD_DEPTH] * 3.0f * dsp_sin1(v->lfo_ph));
         fc = dsp_clamp(fc, 20.0f, 0.42f * E.sr);
         float w = fc * E.inv_sr * 0.5f;                     /* tan(pi fc / sr) */
@@ -256,7 +331,8 @@ static void render_block(float *outl, float *outr, int n)
 
     /* ---- chorus: two modulated taps per side, quadrature LFOs ---- */
     float cmix = E.p[P_CHORUS];
-    float dly_target = E.p[P_DLY_TIME] * 0.001f * E.sr;
+    float dly_target = dly_beats > 0.0f ? dly_beats * beat_s * E.sr : E.p[P_DLY_TIME] * 0.001f * E.sr;
+    if (dly_target > 2.0f * E.sr) dly_target = 2.0f * E.sr;
     float dfb = E.p[P_DLY_FB], dmix = E.p[P_DLY_MIX];
     float rmix = E.p[P_REV_MIX];
     float size = E.p[P_REV_SIZE];
@@ -340,3 +416,6 @@ void engine_render(float *l, float *r, int n)
         n -= m;
     }
 }
+
+_Static_assert(ENGINE_CLK_TICK == 0 && ENGINE_CLK_START == 1 && ENGINE_CLK_CONTINUE == 2 &&
+               ENGINE_CLK_STOP == 3, "engine clock kinds must match RVPANEL_CLK_*");

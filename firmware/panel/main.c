@@ -1,5 +1,6 @@
 // Pico B (panel): 6 encoders (PIO quadrature), 6 switches (1 kHz debounce),
 // 3 SSD1306 OLEDs, MIDI in (UART1 RX), rvpanel link to the Nano (UART0).
+// MIDI clock/start/stop/continue are forwarded from the UART1 IRQ, timestamped.
 //
 // Encoder, switch and MIDI events go to the Nano (and the USB CDC console).
 // The Nano owns the displays: its PAGE packets go straight into the
@@ -106,6 +107,14 @@ static volatile uint32_t midi_head, midi_tail, midi_overruns;
 static void midi_rx_irq(void) {
     while (uart_is_readable(MIDI_UART)) {
         uint8_t b = uart_getc(MIDI_UART);
+        // MIDI clock goes to the Nano from here, stamped now: the main loop
+        // blocks for ms in I2C flushes, which would jitter the beat.
+        switch (b) {
+        case 0xF8: nano_link_send_clock(RVPANEL_CLK_TICK, time_us_32()); break;
+        case 0xFA: nano_link_send_clock(RVPANEL_CLK_START, time_us_32()); break;
+        case 0xFB: nano_link_send_clock(RVPANEL_CLK_CONTINUE, time_us_32()); break;
+        case 0xFC: nano_link_send_clock(RVPANEL_CLK_STOP, time_us_32()); break;
+        }
         if (midi_head - midi_tail >= MIDI_RING_LEN) { midi_overruns++; continue; }
         midi_ring[midi_head % MIDI_RING_LEN] = b;
         midi_head++;

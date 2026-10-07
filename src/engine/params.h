@@ -13,6 +13,8 @@ enum {
     P_CHORUS, P_DLY_TIME, P_DLY_FB, P_DLY_MIX, P_REV_SIZE, P_REV_MIX,
     /* AMP */
     P_ATTACK, P_RELEASE, P_LATCH, P_TRANSPOSE, P_DAMP, P_VOLUME,
+    /* CLOCK (MIDI clock follower) */
+    P_SYNC, P_LFO_DIV, P_DLY_DIV,
     P_COUNT
 };
 
@@ -28,7 +30,7 @@ typedef struct {
     float step;                 /* normalised change per encoder detent */
 } param_desc_t;
 
-#define PAGE_COUNT 4
+#define PAGE_COUNT 5     /* the last page may hold fewer than 6 (empty halves) */
 #define PAGE_PARAMS 6
 extern const char *const page_names[PAGE_COUNT];
 
@@ -37,6 +39,10 @@ float param_to_value(int id, float norm);     /* 0..1 -> value */
 float param_to_norm(int id, float value);
 /* Formats value into buf (>= 12 bytes), e.g. "1.2k", "850ms", "72%". */
 void  param_format(int id, float value, char *buf);
+/* Clock divisions: index (the parameter value) -> beats, 0 = free running. */
+float param_lfo_div_beats(int idx);
+float param_dly_div_beats(int idx);
+
 /* MIDI CC -> parameter id, or -1. */
 int   param_for_cc(int cc);
 #endif

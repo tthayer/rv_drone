@@ -17,6 +17,14 @@ void  engine_note_on(int note, int velocity); /* velocity 0 = note off */
 void  engine_note_off(int note);
 void  engine_all_off(void);
 int   engine_voices_active(void);
+/* MIDI clock follower (24 PPQN). t_us is the sender's timestamp of the event
+ * (Pico B's microsecond timer): tempo comes from tick spacing, so link jitter
+ * does not reach it. Start re-zeroes the beat position. */
+enum { ENGINE_CLK_TICK, ENGINE_CLK_START, ENGINE_CLK_CONTINUE, ENGINE_CLK_STOP };
+void  engine_clock(int kind, uint32_t t_us);
+float engine_bpm(void);                       /* 0 = no clock in the last 0.5 s */
+int   engine_clock_running(void);             /* between Start/Continue and Stop */
+
 /* n frames of stereo float, roughly +-1. Any n; internally 32-frame control blocks. */
 void  engine_render(float *left, float *right, int n);
 #endif

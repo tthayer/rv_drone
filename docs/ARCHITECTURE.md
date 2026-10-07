@@ -274,6 +274,10 @@ Its schematic is `SCH_UnitMIDI_B04`, dated 2024-07-08.
     parsed on Pico B; realtime/SysEx are not forwarded yet.
   - `STATUS 0x84 {rx_ok u32, crc_err u16, cobs_err u16, dropped u16}`: once a
     second; the Nano prints it as `peer(...)`.
+  - `CLOCK 0x85 {kind u8, t_us u32}`: MIDI clock (kind 0 tick 0xF8, 1 start
+    0xFA, 2 continue 0xFB, 3 stop 0xFC), sent **from Pico B's UART1 IRQ** and
+    stamped with its µs timer, so I2C flushes in its main loop add no jitter.
+    All Pico B sends run with IRQs off per packet so packets never interleave.
 - **Ownership:** Pico B draws its local stand-in UI until the first PAGE
   arrives, then shows only the Nano's pages. After 2.5 s without a packet
   from the Nano it falls back to the local UI.
@@ -416,10 +420,21 @@ across the bank plus ±10 cents of per-partial drift, a sine sub one octave
 down, a stereo TPT SVF per voice with a per-voice sine LFO on cutoff (up to
 ±3 octaves), a tanh-style saturator, then chorus (2 taps per side) → cross-fed
 damped delay (≤ 2 s) → 8-line Hadamard FDN reverb → volume + soft clip.
-Control rate is 32 frames. Latch: a note-on with no keys held starts a new
+Control rate is 32 frames.
+**MIDI clock follower** (external master, e.g. the MicroFreak): tempo = mean
+of the last 24 tick intervals (Pico B timestamps; gaps > 250 ms restart the
+average); a beat position advances at that tempo and is pulled onto the tick
+grid each tick (snap if > 1 beat off); Start re-zeroes it. CLOCK page: SYNC
+(OFF/MIDI), LFO DIV (FREE, 1/4 beat … 8 bars per filter-LFO cycle; voices
+offset by ¼ cycle), DLY DIV (FREE, 1/16, 1/8, 1/8., 1/4, 1/4., 1/2; ≤ 2 s).
+With no tick for 0.5 s everything returns to the free-running values. The
+right display's header shows the tempo (`120>BPM` while running).
+Verified in emu: 120 BPM + 1 BAR → filter-LFO period 2.02 s; 90 BPM +
+2 beats → 1.33 s. Latch: a note-on with no keys held starts a new
 chord. Boot latches D2 + A2 so the hardware makes sound without MIDI.
 CCs: 1 mod depth, 7 volume, 71 reso, 72 release, 73 attack, 74 cutoff,
-91 reverb, 93 chorus, 20–43 = parameters 0–23 in page order; 123 = all off.
+91 reverb, 93 chorus, 20–46 = parameters 0–26 in page order (44 SYNC,
+45 LFO DIV, 46 DLY DIV); 123 = all off.
 
 ### Initial sketch
 
@@ -552,8 +567,8 @@ Behaviour:
     mkfs on, 8.3 names, no RTC), `src/fs/diskio.c`, `src/app/preset_fs.c`.
   - Presets: `/presets/P01.TXT`..`P16.TXT`, text `NAME=position` (0..10000)
     per line, robust to parameter additions; `LAST.TXT` = slot loaded at
-    boot. UI page 5 PRESET: enc 1 turn = slot, enc 2 push = load, enc 3 push
-    = save. Console: `i` card info, `F` twice = format, `S`/`L` = slot 1.
+    boot. UI page 6 PRESET (after OSC, FILTER, SPACE, AMP, CLOCK): enc 1 turn
+    = slot, enc 2 push = load, enc 3 push = save. Console: `i` card info, `F` twice = format, `S`/`L` = slot 1.
   - Verified: 32 GB SDHC detected and formatted (FAT32, one MBR partition),
     save + load OK. Host: `make test-presets` round trip.
   - Open: save → power cycle → restored at boot.

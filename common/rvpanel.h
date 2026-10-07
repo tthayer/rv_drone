@@ -23,6 +23,13 @@
 #define RVPANEL_SW          0x82        /* id u8 (0..5), down u8 */
 #define RVPANEL_MIDI        0x83        /* len u8 (1..3), bytes[3] (status first) */
 #define RVPANEL_STATUS      0x84        /* rx_ok u32, crc_err u16, cobs_err u16, dropped u16 */
+#define RVPANEL_CLOCK       0x85        /* kind u8 (RVPANEL_CLK_*), t_us u32 (Pico B timer) */
+
+/* CLOCK kinds: MIDI realtime 0xF8 / 0xFA / 0xFB / 0xFC */
+#define RVPANEL_CLK_TICK      0
+#define RVPANEL_CLK_START     1
+#define RVPANEL_CLK_CONTINUE  2
+#define RVPANEL_CLK_STOP      3
 
 #define RVPANEL_PAGE_LEN    128u
 #define RVPANEL_MAX_RAW     (1u + 2u + RVPANEL_PAGE_LEN + 2u)      /* 133: PAGE + CRC */

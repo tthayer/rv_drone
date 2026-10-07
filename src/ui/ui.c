@@ -174,6 +174,7 @@ void ui_enc(int id, int delta)
         return;
     }
     int p = page_param(id);
+    if (p >= P_COUNT) return;                       /* empty half on the last page */
     const param_desc_t *d = param_desc(p);
     int mag = det < 0 ? -det : det;
     float step = d->step * (mag >= 3 ? 4.0f : 1.0f);   /* fast turns accelerate */
@@ -206,6 +207,7 @@ void ui_sw(int id, int down)
         return;
     }
     int p = page_param(id);
+    if (p >= P_COUNT) return;
     norm[p] = param_to_norm(p, param_desc(p)->def);
     apply(p);
 }
@@ -238,9 +240,12 @@ void ui_midi(const uint8_t *m, int len, uint64_t now)
 
 void ui_set_load(int pct) { load_pct = pct; }
 
+void ui_clock(int kind, uint32_t t_us) { engine_clock(kind, t_us); }
+
 static void draw_half(fb_t *fb, int x0, int enc, uint64_t now)
 {
     int p = page_param(enc);
+    if (p >= P_COUNT) return;                       /* empty half */
     const param_desc_t *d = param_desc(p);
     char buf[16];
 
@@ -322,17 +327,24 @@ void ui_draw(int disp, fb_t *fb, uint64_t now)
             fb_fill_rect(fb, FB_W - 8, 2, 4, 4, true);
         break;
     }
-    default: {                                  /* voices + CPU load */
+    default: {                                  /* voices, MIDI clock tempo, CPU load */
         char *b = buf;
         *b++ = 'V';
         b = put_dec(b, engine_voices_active());
         fb_text(fb, 2, 0, buf, 1, false);
+        float bpm = engine_bpm();
+        if (bpm > 0.0f) {
+            b = put_dec(buf, (int)(bpm + 0.5f));
+            *b++ = engine_clock_running() ? '>' : ' ';
+            *b = 0;
+            fb_text(fb, 22, 0, buf, 1, false);
+            fb_text(fb, 22 + fb_text_width(buf, 1), 0, "BPM", 1, false);
+        }
         if (load_pct >= 0) {
             b = buf;
             b = put_dec(b, load_pct);
             *b++ = '%';
             *b = 0;
-            fb_text(fb, 30, 0, "CPU", 1, false);
             fb_text(fb, FB_W - 2 - fb_text_width(buf, 1), 0, buf, 1, false);
         }
         break;

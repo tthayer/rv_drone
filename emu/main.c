@@ -3,9 +3,10 @@
 //   rv_drone_emu                      window + audio
 //     mouse wheel over a display half = that encoder, click = its switch
 //     z s x d c v g b h n j m ,       = notes C..C (piano layout), up/down = octave
-//     space = all notes off, esc = quit
-//     presets: page 5 (enc 1 push to reach it); files in build/emu/presets
-//   rv_drone_emu --wav out.wav [--seconds N] [--notes 38,45,...] [--set ID=VAL ...]
+//     space = all notes off, k = toggle a 120 BPM test MIDI clock, esc = quit
+//     presets: the last page (enc 1 push to reach it); files in build/emu/presets
+//   rv_drone_emu --wav out.wav [--seconds N] [--notes 38,45,...] [--set NAME=VAL ...]
+//                [--clock BPM]   (MIDI clock at BPM, Start at t=0)
 //     offline render to a 16-bit stereo WAV, then level stats and render speed.
 #include <math.h>
 #include <stdio.h>
@@ -56,12 +57,13 @@ static void wav_header(FILE *f, uint32_t frames) {
 
 static int offline(int argc, char **argv) {
     const char *path = NULL, *notes = NULL;
-    double secs = 20;
+    double secs = 20, clock_bpm = 0;
     engine_init(SR);
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--wav") && i + 1 < argc) path = argv[++i];
         else if (!strcmp(argv[i], "--seconds") && i + 1 < argc) secs = atof(argv[++i]);
         else if (!strcmp(argv[i], "--notes") && i + 1 < argc) notes = argv[++i];
+        else if (!strcmp(argv[i], "--clock") && i + 1 < argc) clock_bpm = atof(argv[++i]);
         else if (!strcmp(argv[i], "--set") && i + 1 < argc) {
             char name[32]; float v;
             if (sscanf(argv[++i], "%31[^=]=%f", name, &v) == 2) {
@@ -86,7 +88,13 @@ static int offline(int argc, char **argv) {
     Uint64 t0 = SDL_GetPerformanceCounter();
     double render_s = 0;
     float l[64], r[64];
+    double tick_s = clock_bpm > 0 ? 60.0 / (24.0 * clock_bpm) : 0, next_tick = 0;
+    if (clock_bpm > 0) engine_clock(ENGINE_CLK_START, 0);
     for (uint32_t done = 0; done < total; done += 64) {
+        while (clock_bpm > 0 && next_tick <= (double)done / SR) {       // ticks due by this block
+            engine_clock(ENGINE_CLK_TICK, (uint32_t)(next_tick * 1e6));
+            next_tick += tick_s;
+        }
         Uint64 a = SDL_GetPerformanceCounter();
         engine_render(l, r, 64);
         render_s += (double)(SDL_GetPerformanceCounter() - a) / (double)SDL_GetPerformanceFrequency();
@@ -175,9 +183,21 @@ int main(int argc, char **argv) {
     SDL_Renderer *ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
     fb_t fb;
     int octave = 48, held_half = -1;
+    int test_clock = 0;
+    double tick_next = 0;
+    const double tick_s = 60.0 / (24.0 * 120.0);
     for (int quit = 0; !quit;) {
         SDL_Event e;
         uint64_t now = SDL_GetTicks64();
+        if (test_clock) {                                   // 120 BPM, exact timestamps
+            double t = (double)SDL_GetPerformanceCounter() / (double)SDL_GetPerformanceFrequency();
+            SDL_LockAudioDevice(dev);
+            while (tick_next <= t) {
+                ui_clock(ENGINE_CLK_TICK, (uint32_t)(uint64_t)(tick_next * 1e6));
+                tick_next += tick_s;
+            }
+            SDL_UnlockAudioDevice(dev);
+        }
         while (SDL_PollEvent(&e)) {
             SDL_LockAudioDevice(dev);
             switch (e.type) {
@@ -206,6 +226,12 @@ int main(int argc, char **argv) {
                 if (k == SDLK_ESCAPE) quit = 1;
                 if (down && k == SDLK_UP) octave += 12;
                 if (down && k == SDLK_DOWN) octave -= 12;
+                if (down && k == SDLK_k) {
+                    test_clock = !test_clock;
+                    tick_next = (double)SDL_GetPerformanceCounter() / (double)SDL_GetPerformanceFrequency();
+                    ui_clock(test_clock ? ENGINE_CLK_START : ENGINE_CLK_STOP, (uint32_t)(uint64_t)(tick_next * 1e6));
+                    printf("test clock %s\n", test_clock ? "120 BPM" : "off");
+                }
                 if (down && k == SDLK_SPACE) { uint8_t m[3] = { 0xB0, 123, 0 }; ui_midi(m, 3, now); }
                 for (int i = 0; i < 13; i++)
                     if (k == piano[i]) {
