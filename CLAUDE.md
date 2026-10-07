@@ -9,6 +9,11 @@ Whenever a change affects them, update the documentation **in the same commit**:
   wires, power, components or modules. Re-render with `make wiring`, look at the PNG
   to check it, and commit the `.yml`, `.svg` and `.png` together.
 
+**Always regenerate the WireViz artifacts when the wiring changes.** The repo's
+pre-commit hook (`.githooks/pre-commit`, enabled with
+`git config core.hooksPath .githooks`) re-renders and stages them whenever a
+`docs/wiring/*.yml` is committed. Still look at the rendered PNG before committing.
+
 Triggers include pin or wiring changes, power changes, new or removed parts,
 protocol or packet changes, console commands, UI controls, and build or tool steps.
 The pin tables in `docs/ARCHITECTURE.md` are the source of truth; the diagrams must agree with them.

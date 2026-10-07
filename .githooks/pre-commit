@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# rv_drone pre-commit: keep the WireViz artifacts in step with their YAML.
+# When any docs/wiring/*.yml is staged, re-render with `make wiring` and stage
+# the regenerated .svg/.png. Blocks the commit if rendering fails.
+# Enable once per clone: git config core.hooksPath .githooks
+set -euo pipefail
+staged=$(git diff --cached --name-only --diff-filter=ACMR -- 'docs/wiring/*.yml')
+[ -z "$staged" ] && exit 0
+if [ ! -x .venv/bin/wireviz ] || ! command -v dot >/dev/null; then
+    echo "pre-commit: wiring YAML changed but WireViz/Graphviz are missing" >&2
+    echo "  .venv/bin/pip install wireviz; brew install graphviz" >&2
+    exit 1
+fi
+make -s wiring >/dev/null || { echo "pre-commit: make wiring failed" >&2; exit 1; }
+for y in $staged; do
+    base=${y%.yml}
+    git add "$base.svg" "$base.png"
+done
+echo "pre-commit: re-rendered WireViz diagrams for: $staged"

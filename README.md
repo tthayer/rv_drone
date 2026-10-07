@@ -179,3 +179,9 @@ To boot each build:
 
 The connection needs USB-C from the Nano to the Mac (data plus power) and
 no SD card, or one without `fip.bin`. A boot takes about 20–40 s.
+
+## Repo hooks
+
+`git config core.hooksPath .githooks` enables the pre-commit hook, which
+re-renders the WireViz diagrams (`docs/wiring/`) whenever their YAML is committed.
+It needs `.venv/bin/pip install wireviz` and `brew install graphviz`.
