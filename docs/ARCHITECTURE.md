@@ -189,7 +189,7 @@ Its schematic is `SCH_UnitMIDI_B04`, dated 2024-07-08.
   | Grove pin | Wire | Net | Connect to |
   |---|---|---|---|
   | 1 | black | GND | GND |
-  | 2 | red | 5 V | Pico B VBUS (pin 40) |
+  | 2 | red | 5 V | Pico B VBUS (pin 40) now; VSYS (pin 39) in the single-supply build |
   | 3 | yellow | UART_MIDI_OUT, host → onboard SAM2695 synth | leave unconnected |
   | 4 | white | UART_MIDI_IN, from the opto | Pico B GP21 (UART1 RX) |
 

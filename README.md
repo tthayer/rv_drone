@@ -60,7 +60,7 @@ PCM5102A wiring for M2 (Pico A):
 | GP10 (pin 14) | BCK |
 | GP11 (pin 15) | LCK / LRCK |
 | GP12 (pin 16) | DIN |
-| 3V3(OUT) (pin 36) | VIN |
+| 3V3(OUT) (pin 36) | VIN (development; single-supply build: 5 V via an RC filter, see `docs/wiring/system.svg`) |
 | GND | GND |
 
 Check your module, as boards differ. On the common purple modules:
