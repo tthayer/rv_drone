@@ -12,6 +12,7 @@
 #include "engine.h"
 #include "osc.h"
 #include "vec.h"
+#include "cpuclk.h"
 #include "ui.h"
 #include "preset_fs.h"
 #include "sd.h"
@@ -197,6 +198,20 @@ void main(uint64_t hartid, uint64_t fdt)
 
     trap_init();
     uart_puts("m1: trap ok\n");
+    {
+        uint32_t before = cpuclk_measure_mhz();
+        uint32_t after = CPU_MHZ ? cpuclk_set_mhz(CPU_MHZ) : before;
+        uart_puts("cpuclk: C906 ");
+        uart_put_dec(before);
+        uart_puts(" MHz at boot -> ");
+        uart_put_dec(after);
+        uart_puts(" MHz (CPU_MHZ=");
+        uart_put_dec(CPU_MHZ);
+        uart_puts(": ");
+        uart_puts(CPU_MHZ ? cpuclk_note() : "left alone");
+        uart_puts(")\n");
+        cpuclk_dump();
+    }
     plic_init();
     uart_puts("m1: plic ok\n");
     uart_enable_rx_irq();
@@ -367,6 +382,13 @@ void main(uint64_t hartid, uint64_t fdt)
                 continue;
             }
             if (c == 'x') { simd_selftest(); continue; }
+            if (c == 'c') {                        /* re-measure the CPU clock */
+                uart_puts("cpuclk: ");
+                uart_put_dec(cpuclk_measure_mhz());
+                uart_puts(" MHz\n");
+                cpuclk_dump();
+                continue;
+            }
             if (c == 'w') {                        /* M7: worst-case load, 4 voices x 7 osc */
                 uint8_t cc[3] = { 0xB0, 20 + P_OSCS, 127 };
                 ui_midi(cc, 3, 0);

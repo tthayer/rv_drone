@@ -17,6 +17,9 @@ BOARD_UP := $(shell echo $(BOARD) | tr a-z A-Z)
 # They need mxstatus.THEADISAEE, which the vendor FSBL sets (the M5 CMO probe
 # depends on it too). C906_OPT=0 builds generic rv64gc for A/B profiling.
 C906_OPT ?= 1
+# Main C906 clock applied at boot (src/hal/cpuclk.c): 1000 = MPLL/1 when MPLL is
+# verified at ~1 GHz (else left as the FSBL set it); 0 = leave it alone.
+CPU_MHZ ?= 1000
 C906_MARCH := rv64imafdc_zicsr_zifencei_xtheadba_xtheadbb_xtheadbs_xtheadcmo_xtheadcondmov_xtheadfmemidx_xtheadmac_xtheadmemidx_xtheadmempair_xtheadsync
 ifeq ($(BOARD)$(C906_OPT),nano1)
 ARCH_CFLAGS := -march=$(C906_MARCH) -mtune=thead-c906 -DBUILD_FLAVOR='"c906"'
@@ -26,7 +29,7 @@ ARCH_CFLAGS := -march=rv64gc -DBUILD_FLAVOR='"rv64gc"'
 VEC_MARCH   := rv64gc_xtheadvector
 endif
 
-CFLAGS  := -std=c11 $(ARCH_CFLAGS) -mabi=lp64d -mcmodel=medany -ffreestanding \
+CFLAGS  := -std=c11 $(ARCH_CFLAGS) -DCPU_MHZ=$(CPU_MHZ) -mabi=lp64d -mcmodel=medany -ffreestanding \
            -nostdlib -O2 -Wall -Wextra -Werror -ffunction-sections -fdata-sections \
            -MMD -MP -DBOARD_$(BOARD_UP) -Isrc/board -Isrc/hal -Isrc/boot -Isrc/drivers -Isrc/engine -Isrc/ui -Isrc/fs -Ithird_party/fatfs -Icommon -Isrc/libc $(EXTRA_CFLAGS)
 ASFLAGS := -march=rv64gc -mabi=lp64d -mcmodel=medany -DBOARD_$(BOARD_UP) -Wall -Werror
@@ -34,7 +37,7 @@ LDFLAGS := -nostdlib -static -Wl,-T,src/boot/link.ld -Wl,-Map,$(NAME).map -Wl,--
 
 SRCS := src/boot/start.S src/boot/trap.S src/hal/uart.c src/hal/trap.c \
        src/hal/timer.c src/hal/plic.c src/hal/reset.c src/hal/cache.c src/hal/dma.c src/app/main.c \
-       src/engine/engine.c src/engine/osc.c src/engine/params.c src/ui/ui.c src/hal/vec.c
+       src/engine/engine.c src/engine/osc.c src/engine/params.c src/ui/ui.c src/hal/vec.c src/hal/cpuclk.c
 ifeq ($(BOARD),nano)
 SRCS += src/hal/pinmux.c src/hal/gpio.c src/hal/spi.c src/hal/sd.c src/fs/diskio.c src/app/preset_fs.c
 FATFS := third_party/fatfs/ff.c

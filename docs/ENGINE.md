@@ -250,14 +250,27 @@ doesn't break older files.
   - **coprocessor C906 @ 700 MHz** (parked today): **16 KB I-cache, 16 KB
     D-cache, no L2** (Diagram 2.1), FPU, no vector unit.
   - **8051** (RTC domain): 25–300 MHz, 8 KB SRAM, for power management.
-  - **Clocks to check on hardware:** the TRM clock table gives `clk_c906_0`
-    (main core) a reset default of **fpll / 2 = 750 MHz** and `clk_c906_1`
-    (coprocessor) **fpll / 3 = 500 MHz**, with other PLL sources selectable.
-    Whether the vendor FSBL raises the main core to 1 GHz is unverified. Measure
-    it (`rdcycle` against the 25 MHz `rdtime` over 1 s). If it is at 750 MHz,
-    every CPU figure in this document was taken at 750 MHz, and moving to the
-    1 GHz source would add about 33 %.
-
+  - **Core clock** (`src/hal/cpuclk.c`, build option `CPU_MHZ`, default 1000):
+    - **Reset default:** the TRM clock table gives `clk_c906_0` fpll / 2 =
+      **750 MHz** (`div_clk_c906_0_1`, `clk_sel_0[23] = 0`). Whether the
+      vendor FSBL raises it is unverified.
+    - **What boot does:** it measures the core clock (`rdcycle` against the
+      25 MHz `rdtime` over 2.5 ms, with a trap probe in case S-mode can't read
+      the cycle counter). With `CPU_MHZ=1000` it then moves the core to
+      **MPLL / 1** via `div_clk_c906_0_0` (src 3 = MPLL, ÷1) and
+      `clk_sel_0[23] = 1`, but only if all of these hold:
+      1. MPLL is powered (`pll_g6_ctrl[0] = 0`);
+      2. MPLL is locked (`pll_g6_status[16]`);
+      3. MPLL computes to 900–1100 MHz from its registers (fractional
+         synthesizer or integer mode);
+      4. the core isn't bypassed to the crystal (`clk_byp_1[6]`).
+    - **Afterwards:** it re-measures and switches back if the result is more
+      than 10 % off target. The banner prints `cpuclk: C906 <before> MHz at boot
+      -> <after> MHz (…)` plus the register values. Console `c` re-measures.
+    - **Nothing else moves:** the UARTs, SPI2, SD and the timer have their own
+      clocks.
+    - **Unverified on hardware.** CPU figures in this document taken before
+      this change may be at 750 MHz.
   Working sets (reuse distance, the live data between a write and its
   read-back):
 

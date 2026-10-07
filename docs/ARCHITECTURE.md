@@ -363,7 +363,10 @@ also run on the host (`emu/`).
 
 ## Runtime model
 
-**Nano (single big core):**
+**Nano (single big core):** at boot the C906 clock is measured and, with
+`CPU_MHZ=1000` (default), moved from the 750 MHz reset default to MPLL / 1 =
+1 GHz after checking MPLL (`src/hal/cpuclk.c`, see `docs/ENGINE.md`).
+
 
 | Context | Trigger | Work |
 |---|---|---|

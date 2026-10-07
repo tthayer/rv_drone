@@ -171,6 +171,7 @@ unit; `--clock BPM` sends MIDI clock with a Start at t = 0.
 
     make BOARD=nano     # the default; outputs build/nano/rv_drone.{elf,bin,map,lst}
     make C906_OPT=0     # generic rv64gc instead of the C906-tuned build (A/B timing)
+    make CPU_MHZ=0      # leave the C906 clock as the FSBL set it (default 1000: MPLL/1, verified at boot)
     make BOARD=qemu
 
 ## Run on QEMU
@@ -260,6 +261,7 @@ result of the kernel self-test (`simd: ...`).
 | `w` | worst-case CPU load: OSCS 7, four voices latched |
 | `v` | engine kernels RVV ↔ scalar (A/B timing; RVV only if the boot self-test passed) |
 | `x` | rerun the scalar-vs-RVV kernel self-test |
+| `c` | measure the C906 clock (rdcycle vs the 25 MHz timer) and print the clock registers |
 | `i` | SD card and volume info |
 | `F` `F` (within 3 s) | format the SD card (erases it) |
 | `S` / `L` | save / load preset slot 1 |
