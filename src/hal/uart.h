@@ -17,4 +17,5 @@ int uart_getc_nonblock(void);    /* -1 if empty */
 
 extern uint32_t uart_isr_count, uart_busy_count;
 void uart_dump_regs(void);
+void uart_report_clock(void);    /* console's real baud + UART clock source (read-only) */
 #endif

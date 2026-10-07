@@ -161,3 +161,57 @@ void uart_dump_regs(void)
     uart_puts(" usr=");  uart_put_hex(*reg(UART_USR));
 #endif
 }
+
+/* Read-only report of the console's real baud rate. The UART clock is
+ * clk_cam0_200, shared by UART0..4 (SG2002 TRM Table 8.4; vendor clk-cv181x.c):
+ * xtal 25 MHz when clk_byp_0[16] = 1 (the reset default), else
+ * div_clk_cam0_200 (src [9:8] = 2: DISPPLL, factor [20:16]). Reads the divisor
+ * latch (DLAB briefly set, line idle, polled mode). Call before uart_async_tx(1). */
+#define UART_LCR 3
+#define UART_DLL 0
+#define UART_DLH 1
+#define LSR_TEMT 0x40
+void uart_report_clock(void)
+{
+#ifdef BOARD_NANO
+    while (!(*reg(UART_LSR) & LSR_TEMT))
+        ;
+#ifdef BOARD_UART_DW
+    for (int i = 0; i < 100000 && (*reg(UART_USR) & 1); i++)
+        ;
+#endif
+    uint8_t lcr = *reg(UART_LCR);
+    *reg(UART_LCR) = lcr | 0x80;
+    uint32_t div = (uint32_t)*reg(UART_DLL) | (uint32_t)*reg(UART_DLH) << 8;
+    *reg(UART_LCR) = lcr;
+    uint32_t byp = *(volatile uint32_t *)(uintptr_t)(BOARD_CLKGEN_BASE + 0x030);
+    uint32_t dcam = *(volatile uint32_t *)(uintptr_t)(BOARD_CLKGEN_BASE + 0x0A8);
+    int xtal = (byp >> 16) & 1;
+    uart_puts("uart: clk_cam0_200 ");
+    if (xtal) {
+        uart_puts("= xtal 25 MHz");
+    } else {
+        uart_puts("from src ");
+        uart_put_dec((dcam >> 8) & 3);
+        uart_puts(" / ");
+        uart_put_dec((dcam >> 16) & 31);
+    }
+    uart_puts(" (div_clk_cam0_200 ");
+    uart_put_hex(dcam);
+    uart_puts("); UART0 divisor ");
+    uart_put_dec(div);
+    if (xtal && div) {
+        uint32_t baud = 25000000u / (16u * div);
+        int32_t ppm = (int32_t)(((int64_t)baud - 115200) * 1000000 / 115200);
+        uart_puts(" -> ");
+        uart_put_dec(baud);
+        uart_puts(" baud (");
+        if (ppm < 0) { uart_putc('-'); ppm = -ppm; }
+        uart_put_dec((uint64_t)(ppm / 10000));
+        uart_putc('.');
+        uart_put_dec((uint64_t)((ppm / 1000) % 10));
+        uart_puts("% vs 115200)");
+    }
+    uart_putc('\n');
+#endif
+}

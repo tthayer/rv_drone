@@ -8,7 +8,6 @@ int panel_link_next_event(panel_event_t *e) { (void)e; return 0; }
 int panel_link_send(uint8_t type, const void *p, unsigned len) { (void)type; (void)p; (void)len; return -1; }
 unsigned panel_link_tx_free(void) { return 0; }
 void panel_link_poll(void) {}
-void panel_link_tick(void) {}
 const volatile panel_link_stats_t *panel_link_stats(void) { return &st; }
 #else
 #include "rvpanel.h"
@@ -33,6 +32,10 @@ const volatile panel_link_stats_t *panel_link_stats(void) { return &st; }
 #define LSR_OE    0x02
 #define USR_BUSY  0x01
 #define USR_TFNF  0x02
+#define IER_ERBFI 0x01                      /* RX data available (+ char timeout) */
+#define IER_ETBEI 0x02                      /* THR empty */
+#define IER_PTIME 0x80                      /* programmable THRE: fires at the FCR TX-empty trigger */
+#define FCR_INIT  0xA7                      /* FIFOs on + reset, RX trigger 1/2 (32 B), TX trigger 1/4 (16 B) */
 #define IIR_BUSY  0x7
 #define CLK_EN_1     0x004          /* bit 18 clk_uart2, bit 19 clk_apb_uart2 */
 #define SOFT_RSTN_0  0x000          /* bit 25 UART2 (active low) */
@@ -46,7 +49,10 @@ static panel_event_t ev[EV_N];
 static volatile uint32_t ev_head, ev_tail;
 
 /* TX ring: producer = main loop (panel_link_send), consumer = drain(), which runs
- * from the tick IRQ and the main loop with SIE off, so it never races itself. */
+ * in the UART2 IRQ (THR-empty, programmable threshold) and once from
+ * panel_link_send with SIE off to start a burst, so it never races itself.
+ * FIFO is 64 B (SG2002 TRM 21.2.2): the IRQ fires at <= 16 B left and refills to
+ * full, so a burst streams at the full line rate. */
 #define TX_N 8192
 static uint8_t tx_buf[TX_N];
 static volatile uint32_t tx_head, tx_tail;
@@ -98,10 +104,23 @@ static void handle_packet(const uint8_t *buf, size_t plen)
     }
 }
 
+static void drain(void)
+{
+    uint32_t t = tx_tail;
+    while (t != tx_head && (REG(USR) & USR_TFNF))
+        REG(THR) = tx_buf[t++ % TX_N];
+    tx_tail = t;
+    if (t == tx_head)
+        REG(IER) = IER_ERBFI;              /* ring empty: THRE interrupt off */
+}
+
 static void uart2_isr(void)
 {
-    if ((REG(IIR) & 0xf) == IIR_BUSY)
+    uint32_t iir = REG(IIR) & 0xf;         /* reading IIR also clears a THRE interrupt */
+    if (iir == IIR_BUSY)
         (void)REG(USR);                    /* clear DW busy-detect */
+    st.tx_irqs += iir == 0x2;
+    drain();
     uint32_t lsr;
     while ((lsr = REG(LSR)) & LSR_DR) {
         if (lsr & LSR_OE)
@@ -117,24 +136,20 @@ static void uart2_isr(void)
     st.rx_cobs_err = rx.cobs_err;
 }
 
-static void drain(void)
-{
-    uint32_t t = tx_tail;
-    while (t != tx_head && (REG(USR) & USR_TFNF))
-        REG(THR) = tx_buf[t++ % TX_N];
-    tx_tail = t;
-}
-
-void panel_link_tick(void) { drain(); }
-
-void panel_link_poll(void)
+/* Fill the FIFO now and arm the THR-empty interrupt for the rest. SIE off so the
+ * IRQ's drain() can't interleave with this one. */
+static void kick(void)
 {
     uint64_t s;
     __asm__ volatile("csrrci %0, sstatus, 2" : "=r"(s));
     drain();
+    if (tx_tail != tx_head)
+        REG(IER) = IER_ERBFI | IER_ETBEI | IER_PTIME;
     if (s & 2)
         __asm__ volatile("csrsi sstatus, 2");
 }
+
+void panel_link_poll(void) { if (tx_tail != tx_head) kick(); }   /* safety net */
 
 unsigned panel_link_tx_free(void) { return TX_N - (tx_head - tx_tail); }
 
@@ -154,6 +169,7 @@ int panel_link_send(uint8_t type, const void *payload, unsigned len)
     __asm__ volatile("" ::: "memory");
     tx_head = h + (uint32_t)n;
     st.tx_packets++;
+    kick();
     return 0;
 }
 
@@ -185,14 +201,14 @@ int panel_link_init(void)
     REG(LCR) = 0x03;                        /* 8N1 */
     if (REG(LCR) != 0x03)
         return -1;                          /* clock/reset not on: registers dead */
-    REG(FCR) = 0x87;                        /* FIFOs on + reset, RX trigger 1/2 */
+    REG(FCR) = FCR_INIT;
     REG(MCR) = 0;
     (void)REG(USR);
     (void)REG(IIR);
     while (REG(LSR) & LSR_DR)
         (void)REG(RBR);
     plic_register(BOARD_UART2_IRQ, uart2_isr);
-    REG(IER) = 0x01;                        /* ERBFI (+ char timeout) */
+    REG(IER) = IER_ERBFI;                   /* TX interrupt armed per burst by kick() */
     return 0;
 }
 

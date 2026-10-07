@@ -250,7 +250,8 @@ encoder 3 to save. Insert or remove the card only with the power off.
 UART0, 115200 8N1. Once a second the Nano prints link, panel, engine and DMA
 statistics, plus a `prof` line with the render time per stage (oscillators,
 voice, chorus, delay, reverb). At boot it reports the vector unit and the
-result of the kernel self-test (`simd: ...`).
+result of the kernel self-test (`simd: ...`), the C906 clock (`cpuclk: ...`)
+and the console's real baud rate and UART clock source (`uart: ...`).
 
 | Key | Action |
 |---|---|

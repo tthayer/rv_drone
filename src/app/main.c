@@ -225,6 +225,7 @@ void main(uint64_t hartid, uint64_t fdt)
     __asm__ volatile("csrs sie, %0" :: "r"((1u << 5) | (1u << 9)));  /* STIE|SEIE */
     __asm__ volatile("csrsi sstatus, 2");                            /* SIE */
     uart_puts("m1: irqs on\n");
+    uart_report_clock();               /* polled mode, line idle: safe to read the divisor */
     uart_async_tx(1);                  /* from here prints never block */
 
 #ifdef BOARD_HAS_SPI_LINK
@@ -327,6 +328,7 @@ void main(uint64_t hartid, uint64_t fdt)
             uart_puts(" ovr "); uart_put_dec(p->rx_overrun);
             uart_puts("  tx pkts "); uart_put_dec(p->tx_packets);
             uart_puts(" drop "); uart_put_dec(p->tx_dropped);
+            uart_puts(" txirq "); uart_put_dec(p->tx_irqs);
             uart_puts("  peer(status "); uart_put_dec(p->peer_status_count);
             uart_puts(", rx ok "); uart_put_dec(p->peer_rx_ok);
             uart_puts(", crc "); uart_put_dec(p->peer_crc_err);

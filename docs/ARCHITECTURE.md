@@ -97,7 +97,20 @@ leaving a/b (left) and j (right) free. Every header GPIO is 3.3 V.
 - **Peripherals:**
   - SPI2 is `snps,dw-apb-ssi` at 0x041A0000, with clock `CV181X_CLK_SPI`.
   - UART2 is `snps,dw-apb-uart` at 0x04160000, with a 25 MHz clock and
-    reg-shift 2.
+    reg-shift 2. FIFOs are 64 B each way (TRM §21.2.2).
+  - **UART clock** (TRM Table 8.4 and vendor `clk-cv181x.c`): every UART's
+    SCLK is **`clk_cam0_200`**, shared by UART0–4. It is the 25 MHz xtal when
+    `clk_byp_0[16] = 1` (the reset default), otherwise `div_clk_cam0_200`
+    (0x0A8; src 2 = DISPPLL, 1200 MHz by default).
+    - The TRM's UART chapter (§21.2.4.1) instead describes `clk_sel_0` bits
+      9–13 and 187.5 MHz. That contradicts the `clk_sel_0` register table
+      (bits 22:1 reserved) and the vendor driver, so it is not used.
+    - Consequence: from 25 MHz, the 115200 console is about 3 % off (the TRM
+      says so itself). DISPPLL / 6 = 200 MHz would give the console 0.45 % and
+      UART2 an exact 1.5625 Mbaud (divisor 8), but both UARTs must be
+      re-divided at the same moment.
+    - Boot prints `uart: clk_cam0_200 … UART0 divisor N -> B baud (E %)`.
+      That report is read-only: the clock is not changed yet.
   - Both come from the SDK `cv181x_base.dtsi`.
   - **SPI2 clock (M4 research):** `clk_spi` = FPLL 1500 MHz / 8 = **187.5 MHz**
     (TRM `clock/clksource_preset_freq_div_param.table.rst:272`, `spi.rst`
@@ -281,8 +294,13 @@ Its schematic is `SCH_UnitMIDI_B04`, dated 2024-07-08.
 - **Ownership:** Pico B draws its local stand-in UI until the first PAGE
   arrives, then shows only the Nano's pages. After 2.5 s without a packet
   from the Nano it falls back to the local UI.
-- **Nano side:** `src/drivers/panel_link.c` (UART2 RX IRQ decodes and queues
-  events; TX ring drained from the 1 kHz tick and the main loop),
+- **Nano side:** `src/drivers/panel_link.c`. The UART2 RX IRQ decodes and
+  queues events. The TX ring is drained by the UART2 **THR-empty interrupt** in
+  programmable-threshold mode (`IER[7]`, `FCR[5:4]` = ¼ full), so the 64-byte FIFO
+  is refilled whenever 16 bytes or fewer are left. Bursts therefore stream at
+  the full 1.5625 Mbaud. Until 2026-10-07 it was drained from the 1 kHz tick,
+  about 64 B/ms, roughly 40 % of the line rate. `txirq` in the panel console
+  line counts these interrupts. Then
   `src/app/ui.c` (state + drawing with the shared `common/fb.c`; inverted
   `NANO n` header marks Nano-drawn screens).
 - **Budget:** about 150 KB/s. A full frame on all 3 displays is about

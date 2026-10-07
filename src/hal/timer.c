@@ -3,7 +3,6 @@
 #include "board.h"
 #include "sbi.h"
 #include "uart.h"
-#include "panel_link.h"
 
 #define PERIOD (BOARD_TIMEBASE_HZ / BOARD_TICK_HZ)
 
@@ -22,5 +21,4 @@ void timer_handler(void)
     deadline += PERIOD;
     sbi_set_timer(deadline);
     uart_tx_drain();
-    panel_link_tick();
 }
