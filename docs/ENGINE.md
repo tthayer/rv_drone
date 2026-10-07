@@ -240,23 +240,32 @@ doesn't break older files.
   | reverb | 8 × 8192 floats = 256 KiB |
   | chorus | 2 × 2048 floats = 16 KiB |
 
-- **Cache hierarchy and working sets.** The big C906 has L1 plus a **128 KB
-  L2**; the little C906 has **no L2**. What matters is each stage's reuse
-  distance (live data between a write and its read-back):
+- **Cores and caches** (SG2002 Preliminary Datasheet V1.0-alpha, §1.2.2):
+  - **main C906 @ 1.0 GHz** (what we run): 32 KB I-cache, **64 KB D-cache**,
+    vector + FPU, **no L2 listed**;
+  - **Cortex-A53 @ 1.0 GHz**, the alternative main core chosen by a boot pin
+    (GPIO_RTX / EPHY_RTX): 32/32 KB L1 + **128 KB L2**, NEON + FPU;
+  - **coprocessor C906 @ 700 MHz** (parked today): FPU, no vector unit listed,
+    cache sizes not given.
 
-  | Stage | Live working set | Big core (128 KB L2) | Little core (L1 only) |
-  |---|---|---|---|
-  | oscillators, filter, envelope | < 1 KB | L1 | L1, a good fit |
-  | chorus | 16 KB | L2 | probably misses |
-  | reverb | Σ line lengths × 4 B: ~70 KB at SIZE 75 %, ~85 KB at 100 % | fits L2 | misses |
-  | delay | delay time × 2 ch × 4 B: 326 KB at 850 ms, 768 KB at 2 s | streams from DDR (sequential) | streams from DDR |
+  Working sets (reuse distance, the live data between a write and its
+  read-back) against the main core's 64 KB L1 D-cache:
 
-  So effects stay on the big core. If the little core is ever used (it is
-  parked today), it should run voice or oscillator work, handing each block
-  back as 512 B with a cache clean and invalidate (the L1s are not coherent).
-  If profiling shows the delay is memory-bound, store it as 16-bit or make
-  sure the T-Head prefetcher is enabled. New features with large
-  random-access tables (wavetables, granular) must fit the big core's L2.
+  | Stage | Live working set | Main C906 (64 KB L1D, no L2) |
+  |---|---|---|
+  | oscillators, filter, envelope | < 1 KB | L1 |
+  | chorus | 16 KB | L1 |
+  | reverb | Σ line lengths × 4 B: ~70 KB at SIZE 75 %, ~85 KB at 100 % | just over L1: sequential misses |
+  | delay | delay time × 2 ch × 4 B: 326 KB at 850 ms, 768 KB at 2 s | streams from DDR (sequential) |
+
+  - **Effects stay on the main core** (with the vector kernels).
+  - **If the coprocessor is used,** its FPU suits voice or oscillator work in
+    scalar C, which has a tiny working set. It would hand each block back as
+    512 B with a cache clean and invalidate, since the L1s are not coherent.
+  - **If profiling shows the reverb or delay is memory-bound,** shrink their
+    footprint (16-bit storage) or make sure the T-Head prefetcher is enabled.
+  - **Large random-access tables** (wavetables, granular) must be sized with
+    the 64 KB L1 in mind.
   The delay, chorus and reverb read positions use integer index arithmetic, so
   the 32-bit write counters never lose precision over long runs.
 - **Numerics:**
