@@ -11,20 +11,29 @@ A bare-metal drone synthesizer on three boards:
 The design, pin maps, link protocols and milestones are in
 `docs/ARCHITECTURE.md`.
 
-**Current state:** M0–M3 are done on hardware.
+**Current state (2026-10-07):** M0–M7 are done on hardware; M8 (presets on
+SD) is working and awaiting its power-cycle test.
 
-- **Nano:** runs a 1 kHz timer interrupt and an interrupt-driven UART0,
-  and `make usbboot` boots it over USB.
-- **Pico A:** plays a 440 Hz tone over I2S.
-- **Pico B:** the panel (encoders, switches, OLEDs, MIDI) works.
+- **Nano:** renders the drone engine (4 voices × 3–7 detuned oscillators,
+  filter, chorus, delay, FDN reverb) at about 33 % CPU worst case, streams it
+  to Pico A over SPI2 DMA, owns the UI on all three OLEDs, follows MIDI clock,
+  and saves/loads presets on the SD card.
+- **Pico A:** plays the Nano's audio from an 8-block ring through the PCM5102A.
+- **Pico B:** forwards encoders, switches, MIDI and MIDI clock; draws the
+  Nano's display pages.
+- **Mac:** the same engine and UI run in an SDL2 emulator (`make emu`).
 
-Next is M4: the Nano's SPI2 link.
+Next: finish M8, then M9 (single 5 V supply, enclosure). Wiring diagrams are
+in `docs/wiring/` (`system.svg`, `panel.svg`).
 
 ## Toolchain
 
     brew install riscv64-elf-gcc qemu dtc
+    brew install sdl2 graphviz                     # emulator; wiring diagrams
+    python3 -m venv .venv && .venv/bin/pip install pyserial wireviz numpy
 
-See "Pico firmware" below for the Pico toolchain.
+See "Pico firmware" below for the Pico toolchain, and `tools/get-vendor.sh`
+for the vendor files (fiptool, FSBL, USB-boot magic, FatFs).
 
 ## Pico firmware
 
@@ -50,8 +59,11 @@ Flash Pico A: either `make pico-flash-audio` (runs
 `picotool load -fx build/firmware/audio/audio.uf2`; it reboots a running Pico
 into BOOTSEL through the USB reset interface), or hold BOOTSEL while plugging
 it in and copy `audio.uf2` to the RPI-RP2 drive. The console is USB CDC: it
-prints the sysclk (153.6 MHz), the PIO divider (25) and, once a second, the DMA
-block count (expect 750/s) and the late-refill count.
+prints the sysclk (153.6 MHz), the PIO divider (25) and, once a second, the
+block count (expect 750/s), late refills, the audio ring (fill, playing or
+priming, underruns, overflows, catch-up requests) and the rvlink receive
+counters. Pico A plays only what the Nano sends: silence until the ring has
+primed.
 
 PCM5102A wiring for M2 (Pico A):
 
@@ -76,7 +88,8 @@ Check your module, as boards differ. On the common purple modules:
 With both Picos on USB, pick one by its USB serial number: `PICO_A_SER` and
 `PICO_B_SER` make variables, which add `--ser <serial>` to `picotool load`:
 
-    make pico-flash-panel PICO_B_SER=E66...
+    make pico-flash-panel PICO_B_SER=53ADB4FD5CB7055B   # this bench's Pico B
+    make pico-flash-audio PICO_A_SER=0608CFFAD05BCF10   # this bench's Pico A
 
 picotool 2.3.1 has no `list` command. `picotool info -a` shows what it finds
 (without arguments it lists BOOTSEL devices only; add `-f` to include running
@@ -96,8 +109,9 @@ resistor on the back from the 0x78 pad to the 0x7A pad. Until then it shares
 0x3C with OLED 0, so the firmware reports `I2C0: 0x3C` and `OLED1 ... not
 found`, and drives OLED 0 only.
 
-M5Stack Unit MIDI (Grove cable): white to GP21 (pin 27), red to VBUS (pin 40),
-black to GND, mode switch on **Bypass**. See the architecture doc for the
+M5Stack Unit MIDI (Grove cable): white to GP21 (pin 27), red to VBUS (pin 40)
+(VSYS, pin 39, in the single-supply build), black to GND, mode switch on
+**Bypass**. See the architecture doc for the
 reasoning and what is still unverified about the 3.5 mm input.
 
 The console (USB CDC) prints a banner (re-printed when a terminal connects),
@@ -106,13 +120,51 @@ V` (also `note_off`, `cc`, `pitch_bend`, `program`; channels print as 1 to 16).
 Encoder totals are raw quadrature counts, usually 4 per detent; swap an
 encoder's A/B wires if it counts backwards. Each OLED shows its two encoders
 (total, position bar, last delta; a half inverts while its switch is held),
-with a MIDI activity box in the header. The display code is `render.c`; M6
-replaces it with pages from the Nano.
+with a MIDI activity box in the header. That local UI (`render.c`) is only a
+fallback now: once the Nano sends display pages (M6) Pico B shows those, and it
+returns to the local UI if the Nano is silent for 2.5 s. Pico B forwards
+encoder, switch, MIDI and MIDI-clock events to the Nano.
 
 Host tests of the MIDI parser, switch debounce and the OLED renderer (which
 also writes the three layouts as PBM images to `build/panel-test/`):
 
     make test-panel
+
+## Emulator (Mac)
+
+The engine (`src/engine`) and UI (`src/ui`) have no hardware dependencies, so
+the same code runs on the Mac with SDL2 for audio and a window showing the
+three OLEDs.
+
+    make emu
+    build/emu/rv_drone_emu
+
+| Control | Action |
+|---|---|
+| Mouse wheel over a display half | turn that encoder |
+| Click a display half | press that encoder's switch (enc 1 = next page; others reset the parameter, or load/save on the PRESET page) |
+| `z s x d c v g b h n j m ,` | play notes C..C (piano layout); ↑ / ↓ = octave |
+| `k` | toggle a 120 BPM test MIDI clock (for the CLOCK page) |
+| space | all notes off |
+| Esc | quit |
+
+Presets are saved to `build/emu/presets/` in the same format as the SD card.
+
+Offline render, for checking the sound without listening:
+
+    make emu-wav                                  # 20 s default drone -> build/emu/drone.wav
+    build/emu/rv_drone_emu --wav out.wav --seconds 30 --notes 38,45,50 \
+        --set CUTOFF=400 --set "LFO DIV=5" --clock 120
+
+It prints peak/RMS/DC per channel, a NaN check and the host render time.
+`--set` takes a parameter name (as shown on the displays) and a value in its
+unit; `--clock BPM` sends MIDI clock with a Start at t = 0.
+
+## Host tests
+
+    make test-link        # rvlink validator + Pico A audio ring
+    make test-panel       # MIDI parser, debounce, OLED rendering, rvpanel COBS/CRC
+    make test-presets     # preset save/load round trip through the UI
 
 ## Build (Nano)
 
@@ -179,6 +231,32 @@ To boot each build:
 
 The connection needs USB-C from the Nano to the Mac (data plus power) and
 no SD card, or one without `fip.bin`. A boot takes about 20–40 s.
+
+## SD card and presets
+
+Use a FAT32 microSD **without `fip.bin`** so the ROM still falls through to USB
+boot. The card can be formatted by the Nano itself (console `F` twice), which
+erases it. Presets live in `/presets/P01.TXT`..`P16.TXT` (one `NAME=position`
+line per parameter, position 0..10000) and `/presets/LAST.TXT` names the slot
+loaded at boot. On the panel: press encoder 1 until the header reads
+`PRESET`, turn encoder 1 to pick a slot, push encoder 2 to load, push
+encoder 3 to save. Insert or remove the card only with the power off.
+
+## Nano console commands
+
+UART0, 115200 8N1. The Nano prints link, panel, engine and DMA statistics once
+a second.
+
+| Key | Action |
+|---|---|
+| Ctrl-R | reset (used by `make usbboot`) |
+| `d` | toggle SPI DMA ↔ polled for the audio link |
+| `t` | force one link transfer (scope trigger) |
+| `p` | toggle the M4 test pattern ↔ engine audio |
+| `w` | worst-case CPU load: OSCS 7, four voices latched |
+| `i` | SD card and volume info |
+| `F` `F` (within 3 s) | format the SD card (erases it) |
+| `S` / `L` | save / load preset slot 1 |
 
 ## Repo hooks
 
