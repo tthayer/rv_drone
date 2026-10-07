@@ -170,6 +170,7 @@ unit; `--clock BPM` sends MIDI clock with a Start at t = 0.
 ## Build (Nano)
 
     make BOARD=nano     # the default; outputs build/nano/rv_drone.{elf,bin,map,lst}
+    make C906_OPT=0     # generic rv64gc instead of the C906-tuned build (A/B timing)
     make BOARD=qemu
 
 ## Run on QEMU

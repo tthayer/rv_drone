@@ -189,7 +189,7 @@ static void led_toggle(void)
 void main(uint64_t hartid, uint64_t fdt)
 {
     led_init();
-    uart_puts("rv_drone hello (hart ");
+    uart_puts("rv_drone [" BUILD_FLAVOR "] hello (hart ");
     uart_put_dec(hartid);
     uart_puts(", fdt ");
     uart_put_hex(fdt);

@@ -12,7 +12,21 @@ BUILD := build/$(BOARD)
 NAME  := $(BUILD)/rv_drone
 BOARD_UP := $(shell echo $(BOARD) | tr a-z A-Z)
 
-CFLAGS  := -std=c11 -march=rv64gc -mabi=lp64d -mcmodel=medany -ffreestanding \
+# C906 tuning (Nano only): -mcpu=thead-c906 = T-Head scalar extensions (Ba/Bb/Bs,
+# CondMov, FMemIdx, MemIdx, MemPair, Mac, Sync, Cmo) + the C906 pipeline model.
+# They need mxstatus.THEADISAEE, which the vendor FSBL sets (the M5 CMO probe
+# depends on it too). C906_OPT=0 builds generic rv64gc for A/B profiling.
+C906_OPT ?= 1
+C906_MARCH := rv64imafdc_zicsr_zifencei_xtheadba_xtheadbb_xtheadbs_xtheadcmo_xtheadcondmov_xtheadfmemidx_xtheadmac_xtheadmemidx_xtheadmempair_xtheadsync
+ifeq ($(BOARD)$(C906_OPT),nano1)
+ARCH_CFLAGS := -march=$(C906_MARCH) -mtune=thead-c906 -DBUILD_FLAVOR='"c906"'
+VEC_MARCH   := $(C906_MARCH)_xtheadvector
+else
+ARCH_CFLAGS := -march=rv64gc -DBUILD_FLAVOR='"rv64gc"'
+VEC_MARCH   := rv64gc_xtheadvector
+endif
+
+CFLAGS  := -std=c11 $(ARCH_CFLAGS) -mabi=lp64d -mcmodel=medany -ffreestanding \
            -nostdlib -O2 -Wall -Wextra -Werror -ffunction-sections -fdata-sections \
            -MMD -MP -DBOARD_$(BOARD_UP) -Isrc/board -Isrc/hal -Isrc/boot -Isrc/drivers -Isrc/engine -Isrc/ui -Isrc/fs -Ithird_party/fatfs -Icommon -Isrc/libc $(EXTRA_CFLAGS)
 ASFLAGS := -march=rv64gc -mabi=lp64d -mcmodel=medany -DBOARD_$(BOARD_UP) -Wall -Werror
@@ -30,7 +44,7 @@ CSRCS := common/fb.c common/font5x7.c
 # RVV (XTheadVector) only for the files that use it; nowhere else gets vector code.
 ifeq ($(BOARD),nano)
 CFLAGS += -DENGINE_RVV
-VEC_CFLAGS := -march=rv64gc_xtheadvector
+VEC_CFLAGS := -march=$(VEC_MARCH)
 $(BUILD)/engine/osc.c.o: CFLAGS += $(VEC_CFLAGS)
 $(BUILD)/hal/vec.c.o: CFLAGS += $(VEC_CFLAGS)
 endif
@@ -39,14 +53,22 @@ OBJS := $(patsubst src/%,$(BUILD)/%.o,$(SRCS)) $(patsubst common/%,$(BUILD)/comm
 
 all: $(NAME).elf $(NAME).bin $(NAME).lst
 
-$(BUILD)/%.c.o: src/%.c
+# Rebuild everything when the compiler flags change (e.g. C906_OPT=0/1), so an
+# A/B build never links objects compiled with the other flags.
+FLAGS_STAMP := $(BUILD)/.cflags
+$(FLAGS_STAMP): FORCE
+	@mkdir -p $(BUILD)
+	@echo '$(CFLAGS) $(VEC_CFLAGS)' | cmp -s - $@ || echo '$(CFLAGS) $(VEC_CFLAGS)' > $@
+FORCE:
+
+$(BUILD)/%.c.o: src/%.c $(FLAGS_STAMP)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
-$(BUILD)/common/%.c.o: common/%.c
+$(BUILD)/common/%.c.o: common/%.c $(FLAGS_STAMP)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 # FatFs (vendor, fetched by tools/get-vendor.sh): our flags minus -Wextra.
-$(BUILD)/third_party/%.c.o: third_party/%.c src/fs/ffconf.h
+$(BUILD)/third_party/%.c.o: third_party/%.c src/fs/ffconf.h $(FLAGS_STAMP)
 	@mkdir -p $(dir $@)
 	$(CC) $(filter-out -Wextra,$(CFLAGS)) -c $< -o $@
 $(BUILD)/%.S.o: src/%.S
@@ -161,7 +183,7 @@ emu-wav: emu
 clean:
 	rm -rf build
 
-.PHONY: emu emu-wav test-presets wiring all run-qemu opensbi fip usbboot pico pico-flash-audio pico-flash-panel test-panel test-link clean
+.PHONY: FORCE emu emu-wav test-presets wiring all run-qemu opensbi fip usbboot pico pico-flash-audio pico-flash-panel test-panel test-link clean
 
 # Header dependencies (after all rules so 'all' stays the default goal).
 -include $(OBJS:.o=.d)

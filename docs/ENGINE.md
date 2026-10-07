@@ -267,6 +267,20 @@ doesn't break older files.
     T-Head's position (bits 24:23), then at the RVV 1.0 position (bits 10:9),
     and retries.
   - The console reports the result (`simd: vector unit ok, VLEN 128, …`).
+- **C906 scalar tuning:** the Nano build defaults to `C906_OPT=1`, which
+  means `-march=rv64imafdc_zicsr_zifencei_xthead{ba,bb,bs,cmo,condmov,fmemidx,mac,memidx,mempair,sync}`
+  plus `-mtune=thead-c906`. It is equivalent to `-mcpu=thead-c906`, so GCC uses
+  T-Head's scalar extensions and the C906 pipeline model:
+  - indexed float loads and stores (`th.flrw`/`th.fsrw`) for the delay-line
+    and buffer taps;
+  - conditional moves (`th.mveqz`/`th.mvnez`) instead of branches;
+  - paired loads and stores (`th.ldd`/`th.sdd`).
+
+  These need `mxstatus.THEADISAEE`, which the vendor FSBL sets; the M5
+  cache-maintenance probe relies on it too. `C906_OPT=0` builds generic
+  `rv64gc` for A/B timing. The boot banner shows which build is running
+  (`rv_drone [c906]` or `[rv64gc]`), and a flags stamp forces a full rebuild
+  when the setting changes.
 - **Self-test before use:** at boot the Nano runs the scalar and RVV
   oscillator kernels on the same random 7-oscillator bank for 8 blocks and
   compares them. The RVV kernel is used only if the largest difference is under
@@ -290,8 +304,9 @@ doesn't break older files.
   |---|---|---|---|---|---|
   | 1.33 | 1.61 | 0.46 | 0.20 | 0.55 | 4.89 |
 
-  The C906 figures are still to be measured. Compare them with the console's
-  `v` key, which switches between the scalar and RVV kernels.
+  The C906 figures are still to be measured. There are four combinations to
+  compare: `C906_OPT=0` or `1` at build time, crossed with the console's `v`
+  key (scalar or RVV kernels) at run time.
 - **Status:** the RVV oscillator kernel is written, compiles to T-Head vector
   instructions, and is guarded by the probe and the self-test. It **has not
   yet run on hardware.** The next candidate is the voice path: 8 filter lanes
