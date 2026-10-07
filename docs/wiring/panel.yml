@@ -1,7 +1,9 @@
 # rv_drone panel wiring: Pico B to the 6 encoders, 3 OLEDs and the Unit MIDI.
 # Source of truth for pins: docs/ARCHITECTURE.md (Pico B table). Render: make wiring.
 # Encoders 1-5 are KY-040 modules (direction inverted in firmware); encoder 6 is
-# a bare EC11 using the Pico's internal pull-ups. Switches pull to GND.
+# a bare EC11 with NO external pull-ups: the firmware enables the RP2350 internal
+# pull-ups (~50k) on every encoder A/B and switch pin (quadrature.pio, main.c).
+# Switches pull to GND. If enc 6 jitters on long leads, add 10k A/B to 3V3.
 
 metadata:
   title: rv_drone - panel wiring (Pico B)
@@ -70,7 +72,7 @@ connectors:
     pinlabels: [CLK (A), DT (B), SW, +, GND]
   ENC6:
     type: Encoder 6 (bare EC11)
-    subtype: A/B/C + switch pair, internal pull-ups
+    subtype: no external pull-ups - Pico B internal pull-ups on A/B/SW (firmware)
     pins: [1, 2, 3, 4, 5]
     pinlabels: [A, B, C (common), SW1, SW2]
   OLED0:

@@ -1,0 +1,19 @@
+Id	Description	Qty	Unit	Designators
+1	Connector, Encoder 1 (KY-040 module), 5 pins	1		ENC1
+2	Connector, Encoder 2 (KY-040 module), 5 pins	1		ENC2
+3	Connector, Encoder 3 (KY-040 module), 5 pins	1		ENC3
+4	Connector, Encoder 4 (KY-040 module), 5 pins	1		ENC4
+5	Connector, Encoder 5 (KY-040 module), 5 pins	1		ENC5
+6	Connector, Encoder 6 (bare EC11), A/B/C + switch pair, internal pull-ups, 5 pins	1		ENC6
+7	Connector, M5Stack Unit MIDI (Grove), mode switch = Bypass, 4 pins	1		MIDI
+8	Connector, OLED 0 SSD1306 128x64, I2C0 0x3C, 4 pins	1		OLED0
+9	Connector, OLED 1 SSD1306 128x64, I2C0 0x3D (addr resistor moved), 4 pins	1		OLED1
+10	Connector, OLED 2 SSD1306 128x64, I2C1 0x3C, 4 pins	1		OLED2
+11	Connector, Pico 2 W B (panel), physical pin numbers, 31 pins	1		PICOB
+12	Wire, bk	0	m	W_ENC1, W_ENC2, W_ENC3, W_ENC4, W_ENC5, W_ENC6, W_MIDI, W_OLED0, W_OLED1, W_OLED2
+13	Wire, bu	0	m	W_ENC1, W_ENC2, W_ENC3, W_ENC4, W_ENC5, W_ENC6, W_OLED0, W_OLED1, W_OLED2
+14	Wire, gn	0	m	W_ENC1, W_ENC2, W_ENC3, W_ENC4, W_ENC5, W_ENC6
+15	Wire, jumper (SW2 to common GND), bk	0	m	J_ENC6
+16	Wire, rd	0	m	W_ENC1, W_ENC2, W_ENC3, W_ENC4, W_ENC5, W_MIDI, W_OLED0, W_OLED1, W_OLED2
+17	Wire, wh	0	m	W_MIDI
+18	Wire, ye	0	m	W_ENC1, W_ENC2, W_ENC3, W_ENC4, W_ENC5, W_ENC6, W_OLED0, W_OLED1, W_OLED2
