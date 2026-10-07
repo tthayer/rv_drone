@@ -240,13 +240,16 @@ doesn't break older files.
   | reverb | 8 × 8192 floats = 256 KiB |
   | chorus | 2 × 2048 floats = 16 KiB |
 
-- **Cores and caches** (SG2002 TRM §2.3.1, and the Preliminary Datasheet V1.0-alpha §1.2.2):
-  - **main C906 @ 1.0 GHz** (what we run): 32 KB I-cache, **64 KB D-cache**,
-    vector + FPU, **no L2 listed**;
+- **Cores and caches** (SG2002 TRM, Diagram 2.1 "System Framework" and §2.3.1):
+  - **main C906 @ 1.0 GHz** (what we run): 32 KB I-cache, 64 KB D-cache and
+    **128 KB L2** (Diagram 2.1), vector + FPU. The §2.3.1 list mentions the L2
+    only under the A53; the diagram shows it for the main C906 as well, most
+    likely the same L2 serving whichever main core boots.
   - **Cortex-A53 @ 1.0 GHz**, the alternative main core chosen by a boot pin
-    (GPIO_RTX / EPHY_RTX): 32/32 KB L1 + **128 KB L2**, NEON + FPU;
-  - **coprocessor C906 @ 700 MHz** (parked today): FPU, no vector unit listed,
-    cache sizes not given.
+    (GPIO_RTX / EPHY_RTX): 32/32 KB L1 + 128 KB L2, NEON + FPU.
+  - **coprocessor C906 @ 700 MHz** (parked today): **16 KB I-cache, 16 KB
+    D-cache, no L2** (Diagram 2.1), FPU, no vector unit.
+  - **8051** (RTC domain): 25–300 MHz, 8 KB SRAM, for power management.
   - **Clocks to check on hardware:** the TRM clock table gives `clk_c906_0`
     (main core) a reset default of **fpll / 2 = 750 MHz** and `clk_c906_1`
     (coprocessor) **fpll / 3 = 500 MHz**, with other PLL sources selectable.
@@ -256,23 +259,23 @@ doesn't break older files.
     1 GHz source would add about 33 %.
 
   Working sets (reuse distance, the live data between a write and its
-  read-back) against the main core's 64 KB L1 D-cache:
+  read-back):
 
-  | Stage | Live working set | Main C906 (64 KB L1D, no L2) |
-  |---|---|---|
-  | oscillators, filter, envelope | < 1 KB | L1 |
-  | chorus | 16 KB | L1 |
-  | reverb | Σ line lengths × 4 B: ~70 KB at SIZE 75 %, ~85 KB at 100 % | just over L1: sequential misses |
-  | delay | delay time × 2 ch × 4 B: 326 KB at 850 ms, 768 KB at 2 s | streams from DDR (sequential) |
+  | Stage | Live working set | Main C906 (64 KB L1D + 128 KB L2) | Coprocessor (16 KB L1D, no L2) |
+  |---|---|---|---|
+  | oscillators, filter, envelope | < 1 KB | L1 | L1, a good fit |
+  | chorus | 16 KB | L1 / L2 | misses |
+  | reverb | Σ line lengths × 4 B: ~70 KB at SIZE 75 %, ~85 KB at 100 % | fits L2 | misses |
+  | delay | delay time × 2 ch × 4 B: 326 KB at 850 ms, 768 KB at 2 s | streams from DDR (sequential) | streams from DDR |
 
   - **Effects stay on the main core** (with the vector kernels).
   - **If the coprocessor is used,** its FPU suits voice or oscillator work in
     scalar C, which has a tiny working set. It would hand each block back as
     512 B with a cache clean and invalidate, since the L1s are not coherent.
-  - **If profiling shows the reverb or delay is memory-bound,** shrink their
-    footprint (16-bit storage) or make sure the T-Head prefetcher is enabled.
-  - **Large random-access tables** (wavetables, granular) must be sized with
-    the 64 KB L1 in mind.
+  - **If profiling shows the delay is memory-bound,** store it as 16-bit or
+    make sure the T-Head prefetcher is enabled.
+  - **Large random-access tables** (wavetables, granular) belong on the main
+    core and must fit its 128 KB L2.
   The delay, chorus and reverb read positions use integer index arithmetic, so
   the 32-bit write counters never lose precision over long runs.
 - **Numerics:**
