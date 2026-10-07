@@ -134,6 +134,12 @@ build/emu/rv_drone_emu: $(EMU_SRCS) $(wildcard src/engine/*.h src/ui/*.h common/
 	cc -std=gnu11 -O2 -Wall -Wextra -Werror -Isrc/engine -Isrc/ui -Icommon $(shell sdl2-config --cflags) \
 	   $(EMU_SRCS) $(shell sdl2-config --libs) -lm -o $@
 
+# Wiring diagrams (WireViz + Graphviz): docs/wiring/*.yml -> .svg/.png.
+#   .venv/bin/pip install wireviz; brew install graphviz
+wiring:
+	.venv/bin/wireviz -f sp docs/wiring/system.yml
+	.venv/bin/wireviz -f sp docs/wiring/panel.yml
+
 # Host test: preset save/load round trip through ui.c with an in-memory store.
 test-presets:
 	@mkdir -p build/emu
@@ -148,7 +154,7 @@ emu-wav: emu
 clean:
 	rm -rf build
 
-.PHONY: emu emu-wav test-presets all run-qemu opensbi fip usbboot pico pico-flash-audio pico-flash-panel test-panel test-link clean
+.PHONY: emu emu-wav test-presets wiring all run-qemu opensbi fip usbboot pico pico-flash-audio pico-flash-panel test-panel test-link clean
 
 # Header dependencies (after all rules so 'all' stays the default goal).
 -include $(OBJS:.o=.d)

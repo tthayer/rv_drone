@@ -1,0 +1,178 @@
+# rv_drone panel wiring: Pico B to the 6 encoders, 3 OLEDs and the Unit MIDI.
+# Source of truth for pins: docs/ARCHITECTURE.md (Pico B table). Render: make wiring.
+# Encoders 1-5 are KY-040 modules (direction inverted in firmware); encoder 6 is
+# a bare EC11 using the Pico's internal pull-ups. Switches pull to GND.
+
+metadata:
+  title: rv_drone - panel wiring (Pico B)
+
+options:
+  fontname: Helvetica
+  bgcolor: WH
+  color_mode: short
+
+connectors:
+  PICOB:
+    type: Pico 2 W B (panel)
+    subtype: physical pin numbers
+    pins: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 14, 15, 16, 17, 18, 19, 20, 24, 25, 26, 27, 28, 29, 31, 32, 33, 34, 36, 38, 39]
+    pinlabels:
+      - GP0 Enc 1 A
+      - GP1 Enc 1 B
+      - GND
+      - GP2 Enc 2 A
+      - GP3 Enc 2 B
+      - GP4 I2C0 SDA
+      - GP5 I2C0 SCL
+      - GND
+      - GP6 Enc 3 A
+      - GP7 Enc 3 B
+      - GP8 Enc 4 SW
+      - GP10 Enc 4 A
+      - GP11 Enc 4 B
+      - GP12 Enc 5 A
+      - GP13 Enc 5 B
+      - GND
+      - GP14 Enc 6 A
+      - GP15 Enc 6 B
+      - GP18 Enc 1 SW
+      - GP19 Enc 2 SW
+      - GP20 Enc 3 SW
+      - GP21 UART1 RX (MIDI)
+      - GND
+      - GP22 Enc 5 SW
+      - GP26 I2C1 SDA
+      - GP27 I2C1 SCL
+      - GND
+      - GP28 Enc 6 SW
+      - 3V3(OUT)
+      - GND
+      - VSYS (5 V via diode)
+  ENC1:
+    type: Encoder 1 (KY-040 module)
+    pins: [1, 2, 3, 4, 5]
+    pinlabels: [CLK (A), DT (B), SW, +, GND]
+  ENC2:
+    type: Encoder 2 (KY-040 module)
+    pins: [1, 2, 3, 4, 5]
+    pinlabels: [CLK (A), DT (B), SW, +, GND]
+  ENC3:
+    type: Encoder 3 (KY-040 module)
+    pins: [1, 2, 3, 4, 5]
+    pinlabels: [CLK (A), DT (B), SW, +, GND]
+  ENC4:
+    type: Encoder 4 (KY-040 module)
+    pins: [1, 2, 3, 4, 5]
+    pinlabels: [CLK (A), DT (B), SW, +, GND]
+  ENC5:
+    type: Encoder 5 (KY-040 module)
+    pins: [1, 2, 3, 4, 5]
+    pinlabels: [CLK (A), DT (B), SW, +, GND]
+  ENC6:
+    type: Encoder 6 (bare EC11)
+    subtype: A/B/C + switch pair, internal pull-ups
+    pins: [1, 2, 3, 4, 5]
+    pinlabels: [A, B, C (common), SW1, SW2]
+  OLED0:
+    type: OLED 0 SSD1306 128x64
+    subtype: I2C0 0x3C
+    pins: [1, 2, 3, 4]
+    pinlabels: [GND, VCC, SCL, SDA]
+  OLED1:
+    type: OLED 1 SSD1306 128x64
+    subtype: I2C0 0x3D (addr resistor moved)
+    pins: [1, 2, 3, 4]
+    pinlabels: [GND, VCC, SCL, SDA]
+  OLED2:
+    type: OLED 2 SSD1306 128x64
+    subtype: I2C1 0x3C
+    pins: [1, 2, 3, 4]
+    pinlabels: [GND, VCC, SCL, SDA]
+  MIDI:
+    type: M5Stack Unit MIDI (Grove)
+    subtype: mode switch = Bypass
+    pins: [1, 2, 3, 4]
+    pinlabels: [GND (black), 5V (red), MIDI_OUT yellow - NC, MIDI_IN (white)]
+    notes: 5 V moves from Pico B VBUS (pin 40) to VSYS (pin 39) for the single-supply build.
+
+cables:
+  W_ENC1:
+    wirecount: 5
+    colors: [YE, GN, BU, RD, BK]
+    category: bundle
+  W_ENC2:
+    wirecount: 5
+    colors: [YE, GN, BU, RD, BK]
+    category: bundle
+  W_ENC3:
+    wirecount: 5
+    colors: [YE, GN, BU, RD, BK]
+    category: bundle
+  W_ENC4:
+    wirecount: 5
+    colors: [YE, GN, BU, RD, BK]
+    category: bundle
+  W_ENC5:
+    wirecount: 5
+    colors: [YE, GN, BU, RD, BK]
+    category: bundle
+  W_ENC6:
+    wirecount: 4
+    colors: [YE, GN, BK, BU]
+    category: bundle
+  W_OLED0:
+    wirecount: 4
+    colors: [BK, RD, YE, BU]
+    category: bundle
+  W_OLED1:
+    wirecount: 4
+    colors: [BK, RD, YE, BU]
+    category: bundle
+  W_OLED2:
+    wirecount: 4
+    colors: [BK, RD, YE, BU]
+    category: bundle
+  J_ENC6:
+    type: jumper (SW2 to common GND)
+    wirecount: 1
+    colors: [BK]
+    category: bundle
+  W_MIDI:
+    wirecount: 3
+    colors: [BK, RD, WH]
+    category: bundle
+
+connections:
+  - - PICOB: [1, 2, 24, 36, 3]
+    - W_ENC1: [1, 2, 3, 4, 5]
+    - ENC1: [1, 2, 3, 4, 5]
+  - - PICOB: [4, 5, 25, 36, 8]
+    - W_ENC2: [1, 2, 3, 4, 5]
+    - ENC2: [1, 2, 3, 4, 5]
+  - - PICOB: [9, 10, 26, 36, 18]
+    - W_ENC3: [1, 2, 3, 4, 5]
+    - ENC3: [1, 2, 3, 4, 5]
+  - - PICOB: [14, 15, 11, 36, 28]
+    - W_ENC4: [1, 2, 3, 4, 5]
+    - ENC4: [1, 2, 3, 4, 5]
+  - - PICOB: [16, 17, 29, 36, 33]
+    - W_ENC5: [1, 2, 3, 4, 5]
+    - ENC5: [1, 2, 3, 4, 5]
+  - - PICOB: [19, 20, 38, 34]
+    - W_ENC6: [1, 2, 3, 4]
+    - ENC6: [1, 2, 3, 4]
+  - - ENC6: [5]
+    - J_ENC6: [1]
+    - ENC6: [3]
+  - - PICOB: [3, 36, 7, 6]
+    - W_OLED0: [1, 2, 3, 4]
+    - OLED0: [1, 2, 3, 4]
+  - - PICOB: [8, 36, 7, 6]
+    - W_OLED1: [1, 2, 3, 4]
+    - OLED1: [1, 2, 3, 4]
+  - - PICOB: [18, 36, 32, 31]
+    - W_OLED2: [1, 2, 3, 4]
+    - OLED2: [1, 2, 3, 4]
+  - - PICOB: [28, 39, 27]
+    - W_MIDI: [1, 2, 3]
+    - MIDI: [1, 2, 4]

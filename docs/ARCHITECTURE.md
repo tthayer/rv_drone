@@ -53,6 +53,11 @@ ADC-ladder input.
 
 ### Nano pins
 
+Wiring diagrams (WireViz; source YAML next to them, `make wiring` to re-render):
+`docs/wiring/system.svg` (single 5 V supply, board-to-board links, DAC with
+its RC supply filter, debug UART) and `docs/wiring/panel.svg` (Pico B to the
+encoders, OLEDs and Unit MIDI). The pin tables below remain the source of truth.
+
 Header naming: L1–L14 is the left column and R1–R14 the right, top to
 bottom (schematic sheet 1/4), with USB-C at the bottom (the L14/R14 end;
 L13/L14 are 5 V). On a breadboard: L sits in column c and R in column i,
@@ -164,8 +169,13 @@ Everything else on Pico A is spare (debug LEDs, scope triggers).
   already have them; most do.
 - **Pico consoles:** both use USB CDC.
 - **Power:** during development each board runs from its own USB, with
-  every GND tied together. For the finished build, one 5 V supply feeds
-  Nano L13 (VSYS) and Pico pin 39 (VSYS) on both Picos.
+  every GND tied together (on battery: the laptop charger caused a ground
+  loop). Finished build: USB-C PD trigger (9 V; not every charger offers
+  12 V) → buck set to 5.0–5.1 V (≥ 1.5 A, bulk cap) → star point feeding
+  Nano L13, each Pico's VSYS (pin 39) through a Schottky diode (so a Pico's
+  own USB can stay plugged in), and the PCM5102A VIN through an RC filter
+  (10 Ω, 220 µF + 100 nF). Unit MIDI 5 V moves to Pico B VSYS. Never plug the
+  Nano's USB-C in while the buck feeds L13. Budget ≈ 0.4–0.7 A at 5 V.
 
 **MIDI input: M5Stack Unit MIDI** (https://docs.m5stack.com/en/unit/Unit_MIDI).
 Its schematic is `SCH_UnitMIDI_B04`, dated 2024-07-08.

@@ -1,0 +1,220 @@
+# rv_drone system wiring: power, board-to-board links, audio out, debug UART.
+# Source of truth for pins: docs/ARCHITECTURE.md. Render: make wiring (WireViz).
+# Power section = the planned single-supply build (M9); during development each
+# board can still run from its own USB with all grounds tied.
+
+metadata:
+  title: rv_drone - system wiring and power
+
+options:
+  fontname: Helvetica
+  bgcolor: WH
+  color_mode: short
+
+connectors:
+  PD:
+    type: USB-C PD trigger
+    subtype: set to 9 V (12 V not offered by every charger)
+    pins: [1, 2]
+    pinlabels: [VOUT+, GND]
+  BUCK:
+    type: Buck converter
+    subtype: set 5.0-5.1 V with no load; 1.5 A min
+    pins: [1, 2, 3, 4]
+    pinlabels: [IN+, IN-, OUT+ 5V, OUT- GND]
+    notes: Bulk cap on OUT (220-470 uF). Star ground point.
+  DA:
+    type: Schottky diode
+    subtype: 1N5817 / SS14 (Pico A feed)
+    pins: [A, K]
+  DB:
+    type: Schottky diode
+    subtype: 1N5817 / SS14 (Pico B feed)
+    pins: [A, K]
+  FILT:
+    type: RC supply filter (audio)
+    subtype: 10 R series, 220 uF + 100 nF to GND
+    pins: [1, 2, 3]
+    pinlabels: [IN 5V, OUT ~4.8V, GND]
+  NANO:
+    type: LicheeRV Nano (SG2002)
+    subtype: header L/R, 3.3 V I/O
+    pins: [L1, L2, L3, L9, L13, R4, R6, R7, R9, R10, R11]
+    pinlabels:
+      - A17 UART0_RX (console)
+      - A16 UART0_TX (console)
+      - GND
+      - A27 DRQ in
+      - 5V / VSYS (= USB-C VBUS)
+      - A29 UART2_RX (panel)
+      - A28 UART2_TX (panel)
+      - P18 SPI2_CS (GPIO)
+      - P21 SPI2_MISO
+      - P22 SPI2_MOSI
+      - P23 SPI2_SCK
+    notes: Do not plug the Nano USB-C in while the buck feeds L13. Never connect L5/L6 (speaker amp).
+  PICOA:
+    type: Pico 2 W A (audio)
+    subtype: physical pin numbers
+    pins: [14, 15, 16, 13, 21, 22, 24, 25, 26, 23, 39, 38]
+    pinlabels:
+      - GP10 I2S BCK
+      - GP11 I2S LRCK
+      - GP12 I2S DIN
+      - GND
+      - GP16 SPI0 RX (MOSI in)
+      - GP17 SPI0 CSn
+      - GP18 SPI0 SCK
+      - GP19 SPI0 TX (MISO out)
+      - GP20 DRQ out
+      - GND
+      - VSYS
+      - GND
+  PICOB:
+    type: Pico 2 W B (panel)
+    subtype: physical pin numbers (panel I/O in panel.yml)
+    pins: [21, 22, 23, 39, 38]
+    pinlabels: [GP16 UART0 TX, GP17 UART0 RX, GND, VSYS, GND]
+  PCM:
+    type: PCM5102A module
+    subtype: "SCK to GND, FMT/FLT/DEMP low (H4L/H1L/H2L), XSMT high (H3L)"
+    pins: [1, 2, 3, 4, 5]
+    pinlabels: [BCK, LCK, DIN, VIN, GND]
+    notes: 3.5 mm line out to the amp. Own ground wire back to the star point.
+  FTDI:
+    type: USB-serial adapter (dev only)
+    subtype: GND/TX/RX only - never its VCC pin
+    pins: [1, 2, 3]
+    pinlabels: [GND, TXD (5 V logic), RXD]
+  DIV:
+    type: Divider into Nano RX
+    subtype: 1 k series, 1.8 k to GND
+    pins: [1, 2, 3]
+    pinlabels: [IN, OUT, GND]
+
+cables:
+  P_IN:
+    wirecount: 2
+    colors: [RD, BK]
+    gauge: 0.5 mm2
+    category: bundle
+  P_NANO:
+    wirecount: 2
+    colors: [RD, BK]
+    gauge: 0.5 mm2
+    category: bundle
+  P_A:
+    wirecount: 1
+    colors: [RD]
+    category: bundle
+  P_A2:
+    wirecount: 1
+    colors: [RD]
+    category: bundle
+  G_A:
+    wirecount: 1
+    colors: [BK]
+    category: bundle
+  P_B:
+    wirecount: 1
+    colors: [RD]
+    category: bundle
+  P_B2:
+    wirecount: 1
+    colors: [RD]
+    category: bundle
+  G_B:
+    wirecount: 1
+    colors: [BK]
+    category: bundle
+  P_PCM:
+    wirecount: 2
+    colors: [RD, BK]
+    category: bundle
+  P_PCM2:
+    wirecount: 2
+    colors: [OG, BK]
+    category: bundle
+  RVLINK:
+    type: rvlink SPI + DRQ (7.8 MHz, keep short, GND alongside)
+    wirecount: 6
+    colors: [YE, GN, BU, VT, WH, BK]
+    category: bundle
+  I2S:
+    type: I2S (64 fs, Pico master)
+    wirecount: 4
+    colors: [YE, GN, BU, BK]
+    category: bundle
+  RVPANEL:
+    type: rvpanel UART 1.5625 Mbaud
+    wirecount: 3
+    colors: [WH, GY, BK]
+    category: bundle
+  DBG:
+    type: debug console 115200
+    wirecount: 2
+    colors: [OG, BK]
+    category: bundle
+  DBG3:
+    wirecount: 1
+    colors: [YE]
+    category: bundle
+  DBG2:
+    wirecount: 2
+    colors: [OG, BK]
+    category: bundle
+
+connections:
+  # supply
+  - - PD: [1, 2]
+    - P_IN: [1, 2]
+    - BUCK: [1, 2]
+  - - BUCK: [3, 4]
+    - P_NANO: [1, 2]
+    - NANO: [L13, L3]
+  - - BUCK: [3]
+    - P_A: [1]
+    - DA: [A]
+  - - DA: [K]
+    - P_A2: [1]
+    - PICOA: [39]
+  - - BUCK: [4]
+    - G_A: [1]
+    - PICOA: [38]
+  - - BUCK: [3]
+    - P_B: [1]
+    - DB: [A]
+  - - DB: [K]
+    - P_B2: [1]
+    - PICOB: [39]
+  - - BUCK: [4]
+    - G_B: [1]
+    - PICOB: [38]
+  - - BUCK: [3, 4]
+    - P_PCM: [1, 2]
+    - FILT: [1, 3]
+  - - FILT: [2, 3]
+    - P_PCM2: [1, 2]
+    - PCM: [4, 5]
+  # Nano <-> Pico A audio link
+  - - NANO: [R7, R9, R10, R11, L9, L3]
+    - RVLINK: [1, 2, 3, 4, 5, 6]
+    - PICOA: [22, 25, 21, 24, 26, 23]
+  # Pico A -> DAC
+  - - PICOA: [14, 15, 16, 13]
+    - I2S: [1, 2, 3, 4]
+    - PCM: [1, 2, 3, 5]
+  # Nano <-> Pico B panel link (crossed TX/RX)
+  - - NANO: [R4, R6, L3]
+    - RVPANEL: [1, 2, 3]
+    - PICOB: [21, 22, 23]
+  # debug console: FTDI TX (5 V) -> divider -> Nano RX; Nano TX -> FTDI RX; GND
+  - - FTDI: [2, 1]
+    - DBG: [2, 1]
+    - DIV: [1, 3]
+  - - DIV: [2, 3]
+    - DBG2: [1, 2]
+    - NANO: [L1, L3]
+  - - NANO: [L2]
+    - DBG3: [1]
+    - FTDI: [3]
