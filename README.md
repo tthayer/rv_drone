@@ -166,6 +166,7 @@ unit; `--clock BPM` sends MIDI clock with a Start at t = 0.
     make test-link        # rvlink validator + Pico A audio ring
     make test-panel       # MIDI parser, debounce, OLED rendering, rvpanel COBS/CRC
     make test-presets     # preset save/load round trip through the UI
+    make test-engine      # exp2 accuracy, envelope timing, voice-steal fade
 
 ## Build (Nano)
 

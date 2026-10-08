@@ -24,4 +24,4 @@ The pin tables in `docs/ARCHITECTURE.md` are the source of truth; the diagrams m
   so the ROM falls through to USB). Console 115200 on that port.
 - Pico A: `make pico-flash-audio PICO_A_SER=0608CFFAD05BCF10`
 - Pico B: `make pico-flash-panel PICO_B_SER=53ADB4FD5CB7055B`
-- Host tests: `make test-link test-panel test-presets`. Emulator: `make emu` and `make emu-wav`.
+- Host tests: `make test-link test-panel test-presets test-engine`. Emulator: `make emu` and `make emu-wav`.

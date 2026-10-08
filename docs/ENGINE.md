@@ -50,11 +50,16 @@ into control blocks internally.
 - **Voice allocation for a note-on:**
   1. the voice already playing that note (it retriggers);
   2. otherwise a silent voice;
-  3. otherwise a releasing voice;
-  4. otherwise the oldest voice.
+  3. otherwise **steal** the quietest releasing voice, else the quietest held
+     voice (ties go to the oldest). The stolen voice **fades out over 30 ms**
+     (`STEAL_FADE_S`) and then starts the new note with fresh phases and an
+     attack from zero. If it is already near silent (below 1e-3), it switches
+     at once. Before 2026-10-07 a steal changed the voice's note instantly,
+     cutting its tail off.
 
   A voice that starts from silence gets random oscillator phases and drift
-  rates, so no two notes start identically.
+  rates, so no two notes start identically. A note-off for a note still
+  queued on a fading voice cancels it.
 - **LATCH ON (the default):** note-offs are ignored. The first note-on after
   all keys have been released starts a new chord, releasing the previous one.
   This holds a drone chord with no sustain pedal.
@@ -96,7 +101,11 @@ into control blocks internally.
   - Synced to MIDI clock, see below. Voices are then offset by ¼ cycle.
 - **Drive:** `tanh_approx(x × (1 + 3·DRIVE)) / (1 + DRIVE)` on each channel
   after the filter.
-- **Envelope:** a one-pole glide towards 1 (gate on) or 0 (gate off). The time
+- **Envelope:** a one-pole glide towards 1 (gate on) or 0 (gate off). The
+  per-sample coefficient 1 − e^(−1/τ) is computed with a series expansion for
+  long times, because 1 − 2^(−tiny) loses all precision. Until 2026-10-07
+  `dsp_exp2`'s Taylor error made every long ATTACK and RELEASE about 6× too
+  short. The time
   constant is ATTACK/3 or RELEASE/3, so the level is about 95 % of the way
   there after ATTACK or RELEASE seconds. A voice is freed when its level falls
   below 1e-4 with the gate off.
@@ -322,7 +331,7 @@ doesn't break older files.
 
   | Function | Accuracy |
   |---|---|
-  | `dsp_exp2` | relative error ~1e-4 (0.14 cent) |
+  | `dsp_exp2` | relative error 8e-8 (degree-6 minimax; was a Taylor fit at 1e-4 until 2026-10-07) |
   | `dsp_sin1` | absolute error 0.0011 |
   | `dsp_tanh` | a rational soft clipper, deliberately not exact tanh (max difference 0.024) |
 
@@ -447,7 +456,8 @@ doesn't break older files.
 
   Presets pick it up automatically.
 - **Tests:** `make test-presets` runs a preset round trip through the UI and
-  engine.
+  engine. `make test-engine` checks `dsp_exp2` accuracy, envelope release
+  timing, and that stolen voices fade out before switching notes.
 - **Measure on hardware:** console `w` sets up the worst-case load. The
   console's `engine:` and `prof` lines show the render time, overall and per
   stage. `v` switches between the scalar and RVV kernels; `x` reruns the

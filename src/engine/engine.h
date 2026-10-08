@@ -19,6 +19,7 @@ void  engine_note_on(int note, int velocity); /* velocity 0 = note off */
 void  engine_note_off(int note);
 void  engine_all_off(void);
 int   engine_voices_active(void);
+void  engine_voice_info(int i, int *note, float *env);   /* read-only, for tests and the UI */
 /* MIDI clock follower (24 PPQN). t_us is the sender's timestamp of the event
  * (Pico B's microsecond timer): tempo comes from tick spacing, so link jitter
  * does not reach it. Start re-zeroes the beat position. */

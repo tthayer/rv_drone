@@ -30,7 +30,13 @@ typedef struct {
     float lfo_ph;
     svf_t f[2];
     uint32_t age;
+    int pending;                        /* note to start once a steal fade ends, -1 = none */
 } voice_t;
+
+/* A stolen voice fades to silence over this long before its new note starts,
+ * instead of being cut off; at 30 ms the late start is hard to hear on a drone. */
+#define STEAL_FADE_S   0.03f
+#define STEAL_DONE_ENV 1e-3f            /* "silent enough" to switch notes */
 
 static struct {
     float sr, inv_sr;
@@ -141,7 +147,10 @@ static float coef_for_time(float seconds, float rate_hz)
     /* one-pole: reach ~95% (3 time constants) in `seconds` */
     float tc = seconds * rate_hz / 3.0f;
     if (tc < 1.0f) return 1.0f;
-    return 1.0f - dsp_exp2(-1.4426950f / tc);
+    float x = 1.0f / tc;                /* per-sample coef = 1 - e^-x */
+    if (x < 0.05f)                      /* series: exact where 1 - 2^(-tiny) loses precision */
+        return x * (1.0f - x * 0.5f * (1.0f - x * (1.0f / 3.0f)));
+    return 1.0f - dsp_exp2(-1.4426950f * x);
 }
 
 void engine_set_param(int id, float value)
@@ -183,30 +192,58 @@ void engine_note_on(int note, int vel)
     E.held++;
     voice_t *best = 0;
     for (int i = 0; i < ENGINE_VOICES; i++)        /* same note: retrigger it */
-        if (E.v[i].note == note) best = &E.v[i];
-    if (!best)
-        for (int i = 0; i < ENGINE_VOICES; i++)    /* a silent voice */
-            if (!E.v[i].gate && E.v[i].env < 1e-4f) { best = &E.v[i]; break; }
-    if (!best)
-        for (int i = 0; i < ENGINE_VOICES; i++)    /* a releasing one, else the oldest */
-            if (!best || (!E.v[i].gate && best->gate) ||
-                (E.v[i].gate == best->gate && E.v[i].age < best->age))
-                best = &E.v[i];
-    voice_start(best, note);
+        if (E.v[i].note == note && E.v[i].pending < 0) best = &E.v[i];
+    if (best) { voice_start(best, note); return; }
+    for (int i = 0; i < ENGINE_VOICES; i++)        /* already queued on a fading voice */
+        if (E.v[i].pending == note) return;
+    for (int i = 0; i < ENGINE_VOICES; i++)        /* a silent voice */
+        if (E.v[i].pending < 0 && !E.v[i].gate && E.v[i].env < 1e-4f) {
+            voice_start(&E.v[i], note);
+            return;
+        }
+    /* Steal: the quietest releasing voice, else the quietest held one (ties: oldest).
+     * It fades out over STEAL_FADE_S and then starts the new note. */
+    for (int i = 0; i < ENGINE_VOICES; i++) {
+        voice_t *v = &E.v[i];
+        if (!best) { best = v; continue; }
+        int vr = !v->gate, br = !best->gate;
+        if (vr != br) { if (vr) best = v; continue; }
+        if (v->env < best->env || (v->env == best->env && v->age < best->age)) best = v;
+    }
+    if (best->env < STEAL_DONE_ENV) {
+        best->env = 0.0f;
+        best->pending = -1;
+        voice_start(best, note);
+    } else {
+        best->gate = 0;
+        best->pending = note;                      /* voice_control() fades it fast */
+    }
 }
 
 void engine_note_off(int note)
 {
     if (E.held > 0) E.held--;
     if (E.p[P_LATCH] >= 0.5f) return;
-    for (int i = 0; i < ENGINE_VOICES; i++)
-        if (E.v[i].note == note) E.v[i].gate = 0;
+    for (int i = 0; i < ENGINE_VOICES; i++) {
+        if (E.v[i].note == note && E.v[i].pending < 0) E.v[i].gate = 0;
+        if (E.v[i].pending == note) E.v[i].pending = -1;   /* released before it started */
+    }
 }
 
 void engine_all_off(void)
 {
     E.held = 0;
-    for (int i = 0; i < ENGINE_VOICES; i++) E.v[i].gate = 0;
+    for (int i = 0; i < ENGINE_VOICES; i++) {
+        E.v[i].gate = 0;
+        E.v[i].pending = -1;
+    }
+}
+
+void engine_voice_info(int i, int *note, float *env)
+{
+    if (i < 0 || i >= ENGINE_VOICES) { *note = -1; *env = 0.0f; return; }
+    *note = E.v[i].note;
+    *env = E.v[i].env;
 }
 
 int engine_voices_active(void)
@@ -223,7 +260,9 @@ void engine_init(float sr)
     E.inv_sr = 1.0f / sr;
     E.rng = 0x12345678u;
     for (int i = 0; i < P_COUNT; i++) E.p[i] = param_desc(i)->def;
-    for (int i = 0; i < ENGINE_VOICES; i++) { E.v[i].note = -1; E.v[i].env = 0; E.v[i].gate = 0; }
+    for (int i = 0; i < ENGINE_VOICES; i++) {
+        E.v[i].note = -1; E.v[i].env = 0; E.v[i].gate = 0; E.v[i].pending = -1;
+    }
     E.held = 0;
     E.cut_s = E.p[P_CUTOFF];
     E.mix_s = 1.0f;
@@ -258,7 +297,8 @@ static void voice_control(voice_t *v, int nosc)
     v->bank.n = nosc;
     v->sub_inc = (uint32_t)(f0 * 0.5f * E.inv_sr * 4294967296.0f);
     v->env_target = v->gate ? 1.0f : 0.0f;
-    v->env_coef = coef_for_time(v->gate ? E.p[P_ATTACK] : E.p[P_RELEASE], E.sr);
+    v->env_coef = coef_for_time(v->pending >= 0 ? STEAL_FADE_S
+                                : v->gate ? E.p[P_ATTACK] : E.p[P_RELEASE], E.sr);
 }
 
 static const float osc_norm[MAX_OSC + 1] = { 0, 1, 0.71f, 0.58f, 0.5f, 0.45f, 0.41f, 0.38f };
@@ -395,7 +435,14 @@ static void render_block(float *outl, float *outr, int n)
             v->f[c].ic2 = dsp_flush(VL.ic2[2 * k + c]);
         }
         v->env = VL.env[2 * k];
-        if (!v->gate && v->env < 1e-4f) { v->env = 0; v->note = -1; }
+        if (v->pending >= 0 && v->env < STEAL_DONE_ENV) {   /* steal fade done: new note */
+            int n2 = v->pending;
+            v->pending = -1;
+            v->env = 0.0f;                                  /* fresh phases, attack from 0 */
+            voice_start(v, n2);
+        } else if (!v->gate && v->env < 1e-4f) {
+            v->env = 0; v->note = -1;
+        }
     }
     if (E.now) {
         E.prof.osc += t_osc;

@@ -12,17 +12,19 @@ static inline float dsp_clamp(float x, float lo, float hi)
     return x < lo ? lo : x > hi ? hi : x;
 }
 
-/* 2^x, |x| < 30: integer part via the exponent field, fraction via a 5th-order
- * polynomial (max rel. error ~1e-4 = 0.14 cent). */
+/* 2^x, |x| < 30: integer part via the exponent field, fraction via a degree-6
+ * minimax polynomial on [0,1) (max rel. error 8e-8 in float). Until 2026-10-07
+ * this used Taylor coefficients (rel. error up to 1e-4 near f = 1), which broke
+ * anything computed as 1 - 2^(-tiny): envelope times were ~6x too short. */
 static inline float dsp_exp2(float x)
 {
     float fl = (float)(int32_t)x;
     if (fl > x) fl -= 1.0f;
     float f = x - fl;
-    float p = 1.0f + f * (0.693147182f + f * (0.240226507f + f * (0.0555041087f +
-              f * (0.00961812911f + f * 0.00133335581f))));
+    float p = 1.0f + f * (0.6931470011f + f * (0.2402299226f + f * (0.05548241306f +
+              f * (0.009681269234f + f * (0.001241431122f + f * 0.0002179599787f)))));
     union { float f; int32_t i; } u = { p };
-    u.i += (int32_t)fl << 23;
+    u.i += (int32_t)fl * (1 << 23);
     return u.f;
 }
 

@@ -173,6 +173,13 @@ wiring:
 	.venv/bin/wireviz -f sp docs/wiring/system.yml
 	.venv/bin/wireviz -f sp docs/wiring/panel.yml
 
+# Host test: exp2 accuracy, envelope timing, voice-steal fade.
+test-engine:
+	@mkdir -p build/emu
+	cc -std=gnu11 -O2 -Wall -Wextra -Isrc/engine emu/test_engine.c \
+	   src/engine/engine.c src/engine/osc.c src/engine/voice.c src/engine/params.c -lm -o build/emu/test_engine
+	build/emu/test_engine
+
 # Host test: preset save/load round trip through ui.c with an in-memory store.
 test-presets:
 	@mkdir -p build/emu
@@ -187,7 +194,7 @@ emu-wav: emu
 clean:
 	rm -rf build
 
-.PHONY: FORCE emu emu-wav test-presets wiring all run-qemu opensbi fip usbboot pico pico-flash-audio pico-flash-panel test-panel test-link clean
+.PHONY: FORCE emu emu-wav test-presets test-engine wiring all run-qemu opensbi fip usbboot pico pico-flash-audio pico-flash-panel test-panel test-link clean
 
 # Header dependencies (after all rules so 'all' stays the default goal).
 -include $(OBJS:.o=.d)
