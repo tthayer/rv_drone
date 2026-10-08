@@ -5,3 +5,8 @@ fip.bin
 .DS_Store
 third_party/
 .venv/
+
+# WireViz side outputs (make wiring renders only .svg/.png)
+docs/wiring/*.html
+docs/wiring/*.tsv
+docs/wiring/*.gv
