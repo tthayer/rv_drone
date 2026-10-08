@@ -10,7 +10,7 @@
 
 #define ENGINE_VOICES 4
 
-void  engine_init(float sample_rate);         /* defaults; latches a D2+A2 drone */
+void  engine_init(float sample_rate);         /* defaults, all voices silent */
 void  engine_set_param(int id, float value);  /* value in the parameter's unit */
 float engine_param(int id);
 void  engine_note_on(int note, int velocity); /* velocity 0 = note off */

@@ -462,7 +462,8 @@ sequencer playing): about 70 ticks/s reach Pico B, the Nano tracks 176 BPM
 with the transport running, and LFO DIV audibly locks the sweep.
 Verified in emu: 120 BPM + 1 BAR → filter-LFO period 2.02 s; 90 BPM +
 2 beats → 1.33 s. Latch: a note-on with no keys held starts a new
-chord. Boot latches D2 + A2 so the hardware makes sound without MIDI.
+chord. The engine starts silent; notes come from MIDI (it latched a D2 + A2
+drone at boot until 2026-10-07).
 CCs: 1 mod depth, 7 volume, 71 reso, 72 release, 73 attack, 74 cutoff,
 91 reverb, 93 chorus, 20–46 = parameters 0–26 in page order (44 SYNC,
 45 LFO DIV, 46 DLY DIV); 123 = all off.
@@ -578,7 +579,7 @@ Behaviour:
     `src/app/panel_ui.c` (panel glue), `emu/main.c` (SDL2 window + audio,
     `--wav` offline render with level stats; `make emu`, `make emu-wav`).
   - Host: default drone renders clean (peak −6 dBFS, no NaN/DC; spectrum
-    shows D2/A2 partials and the sub octave).
+    shows D2/A2 partials and the sub octave; `emu --wav` defaults to those notes).
   - Hardware: encoders/pages and MIDI chords drive the engine. Render cost
     per 64-frame block: 290 µs (2 voices × 5 osc), 444 µs worst case
     (4 voices × 7 osc, console key `w`) = 33 % of the 1333 µs budget.

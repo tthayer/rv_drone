@@ -6,6 +6,7 @@
 //     space = all notes off, k = toggle a 120 BPM test MIDI clock, esc = quit
 //     presets: the last page (enc 1 push to reach it); files in build/emu/presets
 //   rv_drone_emu --wav out.wav [--seconds N] [--notes 38,45,...] [--set NAME=VAL ...]
+//                (--notes defaults to 38,45; the engine itself starts silent)
 //                [--clock BPM]   (MIDI clock at BPM, Start at t=0)
 //     offline render to a 16-bit stereo WAV, then level stats and render speed.
 #include <math.h>
@@ -75,6 +76,7 @@ static int offline(int argc, char **argv) {
             }
         }
     }
+    if (!notes) notes = "38,45";                    // offline default: a D2 + A2 drone
     if (notes) {
         engine_all_off();
         engine_note_on(0, 0);                       // no-op, keeps held at 0

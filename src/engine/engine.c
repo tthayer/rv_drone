@@ -211,9 +211,7 @@ void engine_init(float sr)
     E.cut_s = E.p[P_CUTOFF];
     E.vol_s = E.p[P_VOLUME];
     E.dly_s = E.p[P_DLY_TIME] * 0.001f * sr;
-    engine_note_on(38, 100);                       /* D2 + A2, latched */
-    engine_note_on(45, 100);
-    E.held = 0;
+    /* silent until a note arrives (MIDI, or the emulator's keyboard / --notes) */
 }
 
 /* Control-rate update of one voice: increments, pans, envelope coefficient. */

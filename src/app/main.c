@@ -236,7 +236,7 @@ void main(uint64_t hartid, uint64_t fdt)
     if (vec_ok()) { uart_put_dec((uint64_t)vec_vlen_bits()); uart_puts(", "); }
     uart_puts(vec_how());
     uart_puts(vec_ok() ? "\n" : ")\n");
-    engine_init(48000.0f);             /* latches a D2+A2 drone */
+    engine_init(48000.0f);             /* silent until MIDI notes arrive */
     engine_set_timer(now_ticks);
     engine_set_simd(simd_selftest());  /* RVV kernels only if they match scalar */
     uart_puts(engine_simd() ? "simd: engine using RVV kernels ('v' toggles)\n"

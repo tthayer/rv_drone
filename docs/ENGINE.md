@@ -41,9 +41,11 @@ into control blocks internally.
 
 ## Voices
 
-- **Four voices.** Each voice holds one MIDI note (plus TRANSPOSE). At boot
-  `engine_init()` latches **D2 + A2** (notes 38 and 45), so the hardware makes
-  sound with no MIDI attached.
+- **Four voices.** Each voice holds one MIDI note (plus TRANSPOSE). The engine
+  starts **silent**: `engine_init()` plays nothing until a note arrives, from
+  MIDI or the emulator's keyboard. `emu --wav` defaults to `--notes 38,45`
+  (D2 + A2), so offline renders still have a drone. Until 2026-10-07 the boot
+  latched D2 + A2, so the hardware made sound with no MIDI attached.
 - **Voice allocation for a note-on:**
   1. the voice already playing that note (it retriggers);
   2. otherwise a silent voice;
@@ -234,7 +236,7 @@ doesn't break older files.
   | Load | Time | CPU |
   |---|---|---|
   | 1 voice × 5 osc | ~240 µs | 18 % |
-  | 2 voices × 5 osc (boot drone) | ~290 µs | 21 % |
+  | 2 voices × 5 osc (a D2 + A2 drone) | ~290 µs | 21 % |
   | 4 voices × 7 osc (worst case, console `w`) | ~444 µs | 33 % |
 
   The effects cost about 140 µs per block whatever the voice count. That figure
