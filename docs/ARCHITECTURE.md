@@ -648,7 +648,15 @@ Behaviour:
     mirrored OLED 0); re-soldered.
   - Follow-ups: pull-up on the Nano's UART2 RX pad (A29): with Pico B
     unpowered the line floats and the decoder counts noise as COBS/CRC
-    errors. MIDI realtime (clock) is not forwarded yet.
+    errors. MIDI realtime (clock) is not forwarded yet (since done).
+  - A29 pad (2026-10-07, SG2002 pad table): `IOBLK_G7_REG_IIC0_SDA` at
+    0x03001940 has its internal pull-up (bit 2, PU) **on by reset default**,
+    and our firmware never writes it (not read back on hardware). The errors
+    came with Pico B unpowered, where its pin's protection diodes can hold
+    the line low, which no weak pull-up overcomes. In the single 5 V supply
+    build both boards power up together, so this should not occur; the
+    decoder drops bad packets either way. Add 10 kΩ to 3.3 V only if errors
+    show up with both boards powered.
 - **M7 ✅ (2026-10-06):** drone engine + `emu/`.
   - `src/engine/` (engine.c, params.c, dsp.h: no libm, identical on host and
     Nano), `src/ui/ui.c` (4 pages × 6 params, MIDI routing),
