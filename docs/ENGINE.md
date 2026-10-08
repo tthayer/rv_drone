@@ -149,6 +149,10 @@ rvpanel `CLOCK` packet. See `docs/ARCHITECTURE.md`, "Panel link".
 - **Without a clock** (no tick for 0.5 s), everything falls back to the free
   values. The header shows `120>BPM` while the clock is running and `120 BPM`
   while it is stopped.
+- **Verified on hardware** (2026-10-07) with the MicroFreak as master. It
+  only sends MIDI clock while its arpeggiator or sequencer is playing, and
+  Utility → MIDI → Output dest must be MIDI or BOTH. The Nano tracked 176 BPM
+  (about 70 ticks/s), and the LFO divider audibly locked to the bar.
 - **Checked in emu:** at 120 BPM with 1 BAR, the filter-LFO period measures
   2.02 s. At 90 BPM with 2 beats, it measures 1.33 s.
 

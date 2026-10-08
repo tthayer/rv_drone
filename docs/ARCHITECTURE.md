@@ -457,6 +457,9 @@ grid each tick (snap if > 1 beat off); Start re-zeroes it. CLOCK page: SYNC
 offset by ¼ cycle), DLY DIV (FREE, 1/16, 1/8, 1/8., 1/4, 1/4., 1/2; ≤ 2 s).
 With no tick for 0.5 s everything returns to the free-running values. The
 right display's header shows the tempo (`120>BPM` while running).
+**Verified on hardware (2026-10-07)** with the MicroFreak as master (its
+sequencer playing): about 70 ticks/s reach Pico B, the Nano tracks 176 BPM
+with the transport running, and LFO DIV audibly locks the sweep.
 Verified in emu: 120 BPM + 1 BAR → filter-LFO period 2.02 s; 90 BPM +
 2 beats → 1.33 s. Latch: a note-on with no keys held starts a new
 chord. Boot latches D2 + A2 so the hardware makes sound without MIDI.
