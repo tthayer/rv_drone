@@ -212,9 +212,8 @@ Its schematic is `SCH_UnitMIDI_B04`, dated 2024-07-08.
 - **Mode switch:** set it to **Bypass**. Per the docs, Bypass routes MIDI
   IN to the Grove TX (white). In Separate mode that pin is described as
   floating.
-- **Unverified:** whether the 3.5 mm input is wired as TRS Type A (the
-  MicroFreak's type). If no MIDI arrives, try a Type A↔B adapter or use
-  the DIN input.
+- **Verified (2026-10-07):** the MicroFreak's 3.5 mm TRS MIDI out works through
+  the Unit MIDI's 3.5 mm input (notes and clock), so its TRS type matches.
 - **Bonus:** the unit's SAM2695 General MIDI synth, with its own headphone
   out, could serve as a MIDI monitor while debugging.
 
@@ -567,7 +566,7 @@ Behaviour:
 | M6 ✅ | Nano UART2 + rvpanel end to end | 6 encoders, 6 switches and MIDI reach the Nano; the Nano draws all 3 OLEDs; 0 link errors in steady state (2026-10-06) |
 | M7 ✅ | Drone engine + `emu/` host build | Engine plays on the host, then on hardware via the panel and MIDI |
 | M8 | SDHCI + FatFs presets | Save and load across power cycles |
-| M9 | Perf (RVV), enclosure, single 5 V supply | CPU headroom ≥ 50 % at full polyphony (16 voices: 29 % used with RVV, 2026-10-07) |
+| M9 | Perf (RVV), enclosure, single 5 V supply | CPU headroom ≥ 50 % at full polyphony: **met** (worst case 16 voices × 16 osc = 48 % with RVV, 2026-10-07); enclosure and the single 5 V supply are still to do |
 
 ### Status (2026-10-06)
 
