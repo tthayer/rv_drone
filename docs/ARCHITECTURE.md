@@ -212,8 +212,12 @@ Its schematic is `SCH_UnitMIDI_B04`, dated 2024-07-08.
 - **Mode switch:** set it to **Bypass**. Per the docs, Bypass routes MIDI
   IN to the Grove TX (white). In Separate mode that pin is described as
   floating.
-- **Verified (2026-10-07):** the MicroFreak's 3.5 mm TRS MIDI out works through
-  the Unit MIDI's 3.5 mm input (notes and clock), so its TRS type matches.
+- **3.5 mm TRS input (2026-10-07):** a straight 3.5 mm cable from the MicroFreak
+  does **not** work. The MicroFreak uses **TRS Type B** (Arturia gear is Type B;
+  Novation's TRS compatibility list). The Unit MIDI's 3.5 mm type isn't
+  published, but the failure fits Type A on the Unit side. Use the MicroFreak's
+  grey TRS-to-DIN adapter (Type B) into the Unit MIDI's **DIN** input, or a
+  Type A↔B converter (tip/ring swap) for the 3.5 mm input.
 - **Bonus:** the unit's SAM2695 General MIDI synth, with its own headphone
   out, could serve as a MIDI monitor while debugging.
 
