@@ -98,17 +98,11 @@ int ui_preset_save(int n)
     return 0;
 }
 
-int ui_preset_load(int n)
+/* Parses preset text into positions; parameters missing from the file keep the
+ * values already in out[]. Returns the number of parameters found. */
+static int parse_preset(char *buf, float *out)
 {
-    if (!store) return -1;
-    static char buf[PRESET_MAX];
-    char name[8];
-    slot_name(n, name);
-    int len = store->read(name, buf, PRESET_MAX - 1);
-    if (len == -2) return -2;
-    if (len < 0) return -1;
-    buf[len] = 0;
-    int applied = 0;
+    int found = 0;
     for (char *line = buf; *line;) {
         char *eol = line;
         while (*eol && *eol != '\n') eol++;
@@ -122,19 +116,57 @@ int ui_preset_load(int n)
                 char *c = line;
                 while (*nm && c < eq && *nm == *c) { nm++; c++; }
                 if (!*nm && c == eq) {
-                    norm[i] = (float)(v > 10000 ? 10000 : v) * 0.0001f;
-                    apply(i);
-                    applied++;
+                    out[i] = (float)(v > 10000 ? 10000 : v) * 0.0001f;
+                    found++;
                     break;
                 }
             }
         }
         line = *eol ? eol + 1 : eol;
     }
-    if (!applied) return -3;
+    return found;
+}
+
+/* Reads slot n into out[] (defaults for missing parameters). 0 ok, -1 no
+ * store/card, -2 empty, -3 bad file. */
+static int read_preset(int n, float *out)
+{
+    if (!store) return -1;
+    static char buf[PRESET_MAX];
+    char name[8];
+    slot_name(n, name);
+    int len = store->read(name, buf, PRESET_MAX - 1);
+    if (len == -2) return -2;
+    if (len < 0) return -1;
+    buf[len] = 0;
+    for (int i = 0; i < P_COUNT; i++) out[i] = param_to_norm(i, param_desc(i)->def);
+    return parse_preset(buf, out) ? 0 : -3;
+}
+
+int ui_preset_load(int n)
+{
+    float in[P_COUNT];
+    int r = read_preset(n, in);
+    if (r) return r;
+    for (int i = 0; i < P_COUNT; i++) {
+        norm[i] = in[i];
+        apply(i);
+    }
     char last[4] = { (char)('0' + n / 10), (char)('0' + n % 10), '\n', 0 };
     store->write("LAST.TXT", last, 3);
     return 0;
+}
+
+/* PRESET page preview: the selected slot's stored settings, read when the page
+ * opens, the slot changes, or the slot is saved (never from ui_draw). */
+static float pv[P_COUNT];
+static int pv_slot = -1, pv_status;
+
+static void preview_refresh(int force)
+{
+    if (!force && pv_slot == slot) return;
+    pv_slot = slot;
+    pv_status = read_preset(slot, pv);
 }
 
 void ui_boot_preset(void)
@@ -169,6 +201,7 @@ void ui_enc(int id, int delta)
             slot += det;
             while (slot < 1) slot += UI_PRESET_SLOTS;
             while (slot > UI_PRESET_SLOTS) slot -= UI_PRESET_SLOTS;
+            preview_refresh(0);
             touched_at[0] = now_cached ? now_cached : 1;
         }
         return;
@@ -199,11 +232,15 @@ void ui_sw(int id, int down)
     if (!down) return;
     if (id == 0) {
         page = (page + 1) % UI_PAGES;
+        if (page == PRESET_PAGE) preview_refresh(1);
         return;
     }
     if (page == PRESET_PAGE) {
         if (id == 1) preset_result(ui_preset_load(slot), "LOADED", slot);
-        if (id == 2) preset_result(ui_preset_save(slot), "SAVED", slot);
+        if (id == 2) {
+            preset_result(ui_preset_save(slot), "SAVED", slot);
+            preview_refresh(1);
+        }
         return;
     }
     int p = page_param(id);
@@ -279,6 +316,52 @@ static void draw_label(fb_t *fb, int x0, const char *name, const char *big, cons
         fb_text(fb, x0 + (HALF_W - fb_text_width(hint, 1)) / 2, BAR_Y, hint, 1, true);
 }
 
+/* One preview line: up to two "LBL value" pairs. */
+static void pv_line(fb_t *fb, int y, const char *l1, int p1, const char *l2, int p2)
+{
+    char line[24], v[16];
+    char *b = line;
+    const char *labels[2] = { l1, l2 };
+    int ids[2] = { p1, p2 };
+    for (int k = 0; k < 2; k++) {
+        if (ids[k] < 0) continue;
+        if (k) *b++ = ' ';
+        for (const char *c = labels[k]; *c; c++) *b++ = *c;
+        *b++ = ' ';
+        param_format(ids[k], param_to_value(ids[k], pv[ids[k]]), v);
+        for (char *c = v; *c && b < line + 21; c++) *b++ = *c;
+    }
+    *b = 0;
+    fb_text(fb, 1, y, line, 1, true);
+}
+
+/* Display 2 on the PRESET page: what the selected slot holds. */
+static void draw_preview(fb_t *fb, uint64_t now)
+{
+    char h[24] = "SLOT ";
+    h[5] = (char)('0' + slot / 10);
+    h[6] = (char)('0' + slot % 10);
+    h[7] = 0;
+    fb_fill_rect(fb, 0, 0, FB_W, HDR_H - 1, true);          /* own header */
+    fb_text(fb, 2, 0, h, 1, false);
+    if (msg[0] && now - msg_at < MSG_MS)
+        fb_text(fb, FB_W - 2 - fb_text_width(msg, 1), 0, msg, 1, false);
+    const char *state = pv_status == -2 ? "EMPTY" : pv_status == -1 ? "NO CARD"
+                      : pv_status == -3 ? "BAD FILE" : 0;
+    if (state || pv_slot != slot) {
+        if (!state) state = "...";
+        fb_text(fb, (FB_W - fb_text_width(state, 2)) / 2, 28, state, 2, true);
+        return;
+    }
+    int dly_sync = (int)param_to_value(P_DLY_DIV, pv[P_DLY_DIV]) > 0;
+    pv_line(fb, 11, "CUT", P_CUTOFF, "RES", P_RESO);
+    pv_line(fb, 20, "SHP", P_SHAPE, "DET", P_DETUNE);
+    pv_line(fb, 29, "OSC", P_OSCS, "SUB", P_SUB);
+    pv_line(fb, 38, "DLY", dly_sync ? P_DLY_DIV : P_DLY_TIME, "FB", P_DLY_FB);
+    pv_line(fb, 47, "REV", P_REV_MIX, "SIZE", P_REV_SIZE);
+    pv_line(fb, 56, "ATK", P_ATTACK, "REL", P_RELEASE);
+}
+
 static void draw_preset(fb_t *fb, int disp, uint64_t now)
 {
     char b[8];
@@ -292,8 +375,7 @@ static void draw_preset(fb_t *fb, int disp, uint64_t now)
         draw_label(fb, 0, "SAVE", "->", "push");
         break;
     default:
-        if (msg[0] && now - msg_at < MSG_MS)
-            fb_text(fb, (FB_W - fb_text_width(msg, 1)) / 2, VALUE_Y + 4, msg, 1, true);
+        draw_preview(fb, now);
         break;
     }
     for (int e = 2 * disp; e < 2 * disp + 2; e++)

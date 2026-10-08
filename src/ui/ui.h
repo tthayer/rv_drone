@@ -22,7 +22,7 @@ void ui_clock(int kind, uint32_t t_us);
 void ui_draw(int display, fb_t *fb, uint64_t now_ms);
 
 /* Presets (last page, PRESET): enc 1 turn = slot 1..16, enc 2 push = load,
- * enc 3 push = save. Files are text, one NAME=position (0..10000) per line,
+ * enc 3 push = save; display 2 previews the selected slot's stored settings. Files are text, one NAME=position (0..10000) per line,
  * named P01.TXT..P16.TXT; LAST.TXT holds the slot to load at boot. The store
  * maps names to files (FatFs /presets on the Nano, a directory in emu). */
 typedef struct {

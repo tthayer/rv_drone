@@ -198,7 +198,12 @@ CC values 0–127 map to a position of 0–1. CC 123 is All Notes Off.
 **UI:** the six encoders show the six parameters of the current page; each
 display shows two. Pushing encoder 1 steps through OSC → FILTER → SPACE → AMP
 → CLOCK → PRESET. Pushing any other encoder resets its parameter to the
-default. The PRESET page is described in the README ("SD card and presets").
+default. The PRESET page is described in the README ("SD card and presets"):
+encoder 1 picks the slot, encoder 2 loads and encoder 3 saves. The right
+display previews the selected slot's stored settings: cutoff/reso, shape/detune,
+oscs/sub, delay (time or division)/feedback, reverb/size, attack/release. The
+file is read when the page opens, when the slot changes and after a save,
+never from the draw path.
 Presets store every parameter's position by name, so adding a parameter later
 doesn't break older files.
 

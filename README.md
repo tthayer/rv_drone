@@ -243,7 +243,16 @@ erases it. Presets live in `/presets/P01.TXT`..`P16.TXT` (one `NAME=position`
 line per parameter, position 0..10000) and `/presets/LAST.TXT` names the slot
 loaded at boot. On the panel: press encoder 1 until the header reads
 `PRESET`, turn encoder 1 to pick a slot, push encoder 2 to load, push
-encoder 3 to save. Insert or remove the card only with the power off.
+encoder 3 to save. The right display previews the selected slot's stored
+settings, so you can tell slots apart before loading:
+- cutoff and resonance;
+- shape and detune;
+- oscillator count and sub;
+- delay time (or its sync division) and feedback;
+- reverb mix and size;
+- attack and release.
+
+It shows `EMPTY` or `NO CARD` when there's nothing to show. Insert or remove the card only with the power off.
 
 ## Nano console commands
 
