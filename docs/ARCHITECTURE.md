@@ -471,8 +471,9 @@ target.
   in `sdma_dma_ch_remap0` (0x03000154). `BOARD_SPI_DMA=0` (EXTRA_CFLAGS) or
   the `d` console key selects the polled path; 3 consecutive DMA faults fall
   back to polled automatically. Verified on hardware (10 min soak, 0 errors).
-- **Little core (C906L):** unused. The FSBL starts the vendor `cvirtos.bin`
-  on it (see Unverified), and it will later be replaced by a parking loop.
+- **Little core (C906L):** parked. The FSBL releases it into `build/park.bin`
+  (`src/park/park.S`: `mie = 0`, then a `wfi` loop at 0x83F40000), which
+  replaces the vendor `cvirtos.bin` in the fip.
 
 **Pico A:**
 
@@ -723,9 +724,10 @@ Behaviour:
   pending (`sip=0x220`). Unless USR is read before the UART IRQ is
   enabled, it storms and main never runs. `uart_enable_rx_irq()` reads
   USR and IIR and drains RBR first, and the ISR also clears busy-detect.
-- **Boot log:** the FSBL prints DDR3 at 1866 MT/s and BIST PASS, then the
-  vendor `cvirtos` starts on the C906L ("RT: … CVIRTOS"). After that,
-  "Jump to monitor at 0x80000000" and OpenSBI v1.8.1 run.
+- **Boot log:** the FSBL prints DDR3 at 1866 MT/s and BIST PASS, then
+  "Jump to monitor at 0x80000000" and OpenSBI v1.8.1 run. With the vendor
+  `cvirtos` there was an "RT: … CVIRTOS" line from the C906L; with
+  `park.bin` there is none (checked 2026-10-07).
 
 ### Unverified (from research; confirm on hardware)
 
@@ -735,7 +737,5 @@ Behaviour:
 - **SPI2 DMA:** DMAC register layout and single-LLI transfers with 8-bit beats,
   the handshake remap, the DMA IRQ route (int_mux), S-mode T-Head CMO and
   CS-low-to-first-SCK latency (a few us with DMA vs ~0 polled).
-- **Little core:** since 2026-10-05 the fip carries `build/park.bin`
-  instead of the vendor `cvirtos.bin`. The FSBL still releases the C906L,
-  but it only runs a `wfi` loop at 0x83F40000. The top 2 MB (0x8FE00000+)
-  stays reserved in the DTS.
+- **Little core:** the top 2 MB (0x8FE00000+) stays reserved in the DTS for
+  it, unused while it is parked.
