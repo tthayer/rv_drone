@@ -265,6 +265,25 @@ Its schematic is `SCH_UnitMIDI_B04`, dated 2024-07-08.
 | audio: 64 × (L,R) int32, 24-bit left-aligned (512 B) | padding |
 | CRC32 | CRC32 |
 
+- **Known issue (2026-10-07): link noise in the analog output.**
+  - **Symptom:** with the engine silent (the Nano's `out: peak` reads 0/0), a
+    high-pitched tone is audible on the **right** channel.
+  - **Diagnosis:** it stops when the Nano holds the link idle, and persists
+    with Pico B and the OLEDs unpowered. So it is electrical coupling of the
+    7.8 MHz SPI bursts and DRQ edges (750/s) into the DAC output through the
+    ground wiring, not data. It was masked by the old always-on boot drone.
+  - **Confirmed:** fitting the Pico B ↔ Nano ground (wire 3 of the panel cable
+    in `docs/wiring/system.svg`) cut the tone a lot.
+  - **Rules:** every board-to-board ground in the diagram must be fitted,
+    short and solid, ideally starred to one point. The Nano ↔ Pico A link
+    ground (L3 → pin 23) carries the SPI return current, so it matters most.
+  - **Further fixes:**
+    - a dedicated PCM5102A ground to Pico A pin 13;
+    - SPI/DRQ wires twisted with ground and routed away from the DAC and jack;
+    - the planned RC filter on the DAC's VIN.
+
+    Software mitigations not yet tried: lower SPI pad drive strength, slower
+    SCK.
 - **Errors:** a CRC failure drops the block (Pico A plays silence for it)
   and bumps a counter. A sequence gap counts as an underrun.
 - **Latency:** at most 4 × 64 frames ≈ 5.3 ms. The Nano always has the next
