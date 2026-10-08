@@ -258,7 +258,9 @@ It shows `EMPTY` or `NO CARD` when there's nothing to show. Insert or remove the
 
 UART0, 115200 8N1. Once a second the Nano prints link, panel, engine and DMA
 statistics, plus a `prof` line with the render time per stage (oscillators,
-voice, chorus, delay, reverb). At boot it reports the vector unit and the
+voice, chorus, delay, reverb), and an `out: peak L … R …` line with the largest
+sample sent to Pico A on each channel. Both are 0 when silent, which separates
+data problems from electrical noise. At boot it reports the vector unit and the
 result of the kernel self-test (`simd: ...`), the C906 clock (`cpuclk: ...`)
 and the console's real baud rate and UART clock source (`uart: ...`).
 

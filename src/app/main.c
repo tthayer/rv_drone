@@ -71,6 +71,7 @@ size_t strlen(const char *s)
  * the console and the header's CPU figure. */
 #define RENDER_MAX 64
 static uint64_t render_ticks_sum, render_blocks, render_last_avg;
+static int32_t out_peak[2];               /* largest |sample| sent per channel, reset each second */
 static uint32_t render_max_ticks;
 
 static void render_block(int32_t *lr, unsigned frames)
@@ -83,6 +84,10 @@ static void render_block(int32_t *lr, unsigned frames)
         float b = r[i] < -1.0f ? -1.0f : r[i] > 1.0f ? 1.0f : r[i];
         lr[2 * i] = (int32_t)(a * 8388607.0f) * 256;       /* 24-bit, left-aligned */
         lr[2 * i + 1] = (int32_t)(b * 8388607.0f) * 256;
+        int32_t ma = lr[2 * i] < 0 ? -lr[2 * i] : lr[2 * i];
+        int32_t mb = lr[2 * i + 1] < 0 ? -lr[2 * i + 1] : lr[2 * i + 1];
+        if (ma > out_peak[0]) out_peak[0] = ma;
+        if (mb > out_peak[1]) out_peak[1] = mb;
     }
     uint32_t dt = (uint32_t)(rdtime() - t0);
     render_ticks_sum += dt;
@@ -379,6 +384,10 @@ void main(uint64_t hartid, uint64_t fdt)
             uart_put_dec((uint64_t)engine_voices_active()); uart_putc('\n');
             ui_set_load((int)render_load_pct());
             print_profile();
+            uart_puts("out: peak L "); uart_put_dec((uint64_t)(out_peak[0] >> 8));
+            uart_puts(" R "); uart_put_dec((uint64_t)(out_peak[1] >> 8));
+            uart_puts(" (24-bit LSBs sent to Pico A)\n");
+            out_peak[0] = out_peak[1] = 0;
             render_max_ticks = 0;
             uart_puts("dma: "); uart_puts(audio_link_dma_active() ? "on" : "off");
             uart_puts(" frames "); uart_put_dec(l->dma_frames);
