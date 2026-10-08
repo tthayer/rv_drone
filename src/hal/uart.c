@@ -186,15 +186,18 @@ void uart_report_clock(void)
     *reg(UART_LCR) = lcr;
     uint32_t byp = *(volatile uint32_t *)(uintptr_t)(BOARD_CLKGEN_BASE + 0x030);
     uint32_t dcam = *(volatile uint32_t *)(uintptr_t)(BOARD_CLKGEN_BASE + 0x0A8);
-    int xtal = (byp >> 16) & 1;
+    /* xtal if bypassed, or if the divider's source is 0/1 (both osc in the vendor
+     * driver's parent list {osc, osc, disppll}) with factor 1. */
+    uint32_t src = (dcam >> 8) & 3, fac = (dcam >> 16) & 31;
+    int xtal = ((byp >> 16) & 1) || (src < 2 && fac <= 1);
     uart_puts("uart: clk_cam0_200 ");
     if (xtal) {
-        uart_puts("= xtal 25 MHz");
+        uart_puts(((byp >> 16) & 1) ? "= xtal 25 MHz (bypass)" : "= osc 25 MHz (src 0, /1)");
     } else {
         uart_puts("from src ");
-        uart_put_dec((dcam >> 8) & 3);
+        uart_put_dec(src);
         uart_puts(" / ");
-        uart_put_dec((dcam >> 16) & 31);
+        uart_put_dec(fac);
     }
     uart_puts(" (div_clk_cam0_200 ");
     uart_put_hex(dcam);

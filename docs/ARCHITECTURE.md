@@ -109,8 +109,11 @@ leaving a/b (left) and j (right) free. Every header GPIO is 3.3 V.
       says so itself). DISPPLL / 6 = 200 MHz would give the console 0.45 % and
       UART2 an exact 1.5625 Mbaud (divisor 8), but both UARTs must be
       re-divided at the same moment.
-    - Boot prints `uart: clk_cam0_200 … UART0 divisor N -> B baud (E %)`.
-      That report is read-only: the clock is not changed yet.
+    - **Measured (2026-10-07):** `div_clk_cam0_200` = 0x00010009 (src 0 =
+      osc, ÷1) gives 25 MHz. UART0 divisor 14 → **111,607 baud, −3.1 %**
+      against 115200; the console works at that error. Boot prints
+      `uart: clk_cam0_200 … UART0 divisor N -> B baud (E %)`, read-only. The
+      clock is not changed yet.
   - Both come from the SDK `cv181x_base.dtsi`.
   - **SPI2 clock (M4 research):** `clk_spi` = FPLL 1500 MHz / 8 = **187.5 MHz**
     (TRM `clock/clksource_preset_freq_div_param.table.rst:272`, `spi.rst`
@@ -381,9 +384,10 @@ also run on the host (`emu/`).
 
 ## Runtime model
 
-**Nano (single big core):** at boot the C906 clock is measured and, with
-`CPU_MHZ=1000` (default), moved from the 750 MHz reset default to MPLL / 1 =
-1 GHz after checking MPLL (`src/hal/cpuclk.c`, see `docs/ENGINE.md`).
+**Nano (single big core):** the vendor FSBL runs the C906 at **1050 MHz**
+(MPLL / 1; measured at boot by `src/hal/cpuclk.c`, see `docs/ENGINE.md`).
+`CPU_MHZ=1000` (the default) only steps in if the clock is more than 10 % off
+target.
 
 
 | Context | Trigger | Work |

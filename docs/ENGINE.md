@@ -252,8 +252,13 @@ doesn't break older files.
   - **8051** (RTC domain): 25–300 MHz, 8 KB SRAM, for power management.
   - **Core clock** (`src/hal/cpuclk.c`, build option `CPU_MHZ`, default 1000):
     - **Reset default:** the TRM clock table gives `clk_c906_0` fpll / 2 =
-      **750 MHz** (`div_clk_c906_0_1`, `clk_sel_0[23] = 0`). Whether the
-      vendor FSBL raises it is unverified.
+      **750 MHz** (`div_clk_c906_0_1`, `clk_sel_0[23] = 0`).
+    - **Measured (2026-10-07): the vendor FSBL already runs the core at
+      1050 MHz.** It sets MPLL to 25 × 42 = 1050 MHz (`mpll_csr` 0x05548101),
+      selects it through `div_clk_c906_0_0` (0x00010309) and sets
+      `clk_sel_0` to 0x01800000. With `CPU_MHZ=1000` the boot sees "already
+      within 10 %" and leaves it alone. Every CPU figure in this document is at
+      1050 MHz.
     - **What boot does:** it measures the core clock (`rdcycle` against the
       25 MHz `rdtime` over 2.5 ms, with a trap probe in case S-mode can't read
       the cycle counter). With `CPU_MHZ=1000` it then moves the core to
@@ -269,8 +274,6 @@ doesn't break older files.
       -> <after> MHz (…)` plus the register values. Console `c` re-measures.
     - **Nothing else moves:** the UARTs, SPI2, SD and the timer have their own
       clocks.
-    - **Unverified on hardware.** CPU figures in this document taken before
-      this change may be at 750 MHz.
   Working sets (reuse distance, the live data between a write and its
   read-back):
 
@@ -346,6 +349,31 @@ doesn't break older files.
 
   The Nano prints a `prof (us/64-frame block, rvv|scalar): …` line every
   second, and `emu --wav` prints the same breakdown for the host.
+- **Measured on the C906** (2026-10-07, 1050 MHz), worst case 4 voices ×
+  7 oscillators, in µs per 64-frame block (budget 1333):
+
+  | Build | osc | voice | chorus | delay | reverb | total | CPU |
+  |---|---|---|---|---|---|---|---|
+  | M7 baseline (old kernel, generic) | | | | | | 444 | 33 % |
+  | generic rv64gc, scalar | 135 | 63 | 15 | 8 | 138 | 387 | 29 % |
+  | generic rv64gc, RVV | 27 | 63 | 15 | 8 | 137 | 279 | 21 % |
+  | C906-tuned, scalar | 136 | 63 | 14 | 8 | 137 | 387 | 29 % |
+  | C906-tuned, RVV | 28 | 62 | 14 | 8 | 137 | 278 | 21 % |
+  | **C906-tuned, RVV, padded buffers** | **28** | 63 | 14 | 7 | **62** | **202** | **15 %** |
+
+  The default 2-voice drone renders in 138 µs (10 %).
+  - **The RVV oscillator kernel is 4.9× faster** than scalar.
+  - **`-mcpu=thead-c906` tuning makes no measurable difference** (it's kept,
+    since it costs nothing).
+  - **The reverb was cache-set bound:** all 8 lines are written at the same
+    index into power-of-two-sized arrays, so they collided in one D-cache set
+    (about 130 ns per access). Padding each row by one 64 B line
+    (`REV_PAD`, plus `DLY_PAD` between the delay's L/R) took it from 137 to
+    62 µs, with bit-identical output (host WAV checksum unchanged).
+  - **What's left:** the voice path (sub, filter, drive, envelope; 63 µs) and
+    the reverb (62 µs) are now the largest stages. The candidates are 8-lane
+    vector SVF/tanh for the voice path, and a closer look at the reverb's
+    remaining memory traffic.
 - **Host reference** (Apple M4, clang `-O2`, where the scalar kernels are
   auto-vectorised), worst case 4 voices × 7 oscillators, in µs per block:
 
@@ -353,12 +381,12 @@ doesn't break older files.
   |---|---|---|---|---|---|
   | 1.33 | 1.61 | 0.46 | 0.20 | 0.55 | 4.89 |
 
-  The C906 figures are still to be measured. There are four combinations to
-  compare: `C906_OPT=0` or `1` at build time, crossed with the console's `v`
-  key (scalar or RVV kernels) at run time.
-- **Status:** the RVV oscillator kernel is written, compiles to T-Head vector
-  instructions, and is guarded by the probe and the self-test. It **has not
-  yet run on hardware.** The next candidate is the voice path: 8 filter lanes
+  Reproduce the C906 table with `C906_OPT=0` or `1` at build time, crossed with
+  the console's `v` key (scalar or RVV kernels) at run time, and `w` for the
+  worst case.
+- **Status:** **verified on hardware** (2026-10-07). The probe finds the vector
+  unit off at boot and enables it via `sstatus.VS[24:23]` (VLEN 128). The
+  self-test passes, with a largest difference of 1.8e-7. The next candidate is the voice path: 8 filter lanes
   (4 voices × 2 channels) per sample in one vector op. Whether to do it
   depends on the C906 profile.
 

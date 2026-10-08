@@ -88,8 +88,8 @@ uint32_t cpuclk_set_mhz(uint32_t mhz)
         note = "only 1000 MHz (MPLL/1) is supported";
         return before;
     }
-    if (before && before > 950 && before < 1050) {
-        note = "already ~1 GHz (FSBL)";
+    if (before >= mhz * 9 / 10 && before <= mhz * 11 / 10) {
+        note = "already within 10 % of target (set by the FSBL): left alone";
         return before;
     }
     if (R32(CLK_BYP_1) & (1u << 6)) {

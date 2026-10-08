@@ -8,6 +8,14 @@
 #define CHO_N       2048
 #define REV_LINES   8
 #define REV_N       8192
+/* Cache-set staggering: buffers whose sizes are powers of two and that are
+ * accessed at the same index (all 8 reverb lines are written at rev_w; the
+ * delay's L/R pair at dly_w) otherwise map to the same D-cache set and evict
+ * each other on every sample. On the C906 that cost ~130 ns per reverb access
+ * (137 us/block). Padding each reverb row by one 64 B line puts line j j sets
+ * further on; the delay's R buffer is pushed 5 lines away from L. */
+#define REV_PAD     16                  /* floats = one 64 B cache line */
+#define DLY_PAD     (16 * 5)
 
 typedef struct { float ic1, ic2; } svf_t;
 
@@ -35,10 +43,12 @@ static struct {
     float cho_l[CHO_N], cho_r[CHO_N];
     uint32_t cho_w;
     float cho_ph;
-    float dly_l[DLY_N], dly_r[DLY_N];
+    float dly_l[DLY_N];
+    float dly_pad[DLY_PAD];
+    float dly_r[DLY_N];
     uint32_t dly_w;
     float dly_lp_l, dly_lp_r;
-    float rev[REV_LINES][REV_N];
+    float rev[REV_LINES][REV_N + REV_PAD];
     uint32_t rev_w;
     float rev_lp[REV_LINES];
     uint32_t rev_lenI[REV_LINES];
