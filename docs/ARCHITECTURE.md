@@ -113,7 +113,8 @@ leaving a/b (left) and j (right) free. Every header GPIO is 3.3 V.
       osc, ÷1) gives 25 MHz. UART0 divisor 14 → **111,607 baud, −3.1 %**
       against 115200; the console works at that error. Boot prints
       `uart: clk_cam0_200 … UART0 divisor N -> B baud (E %)`, read-only. The
-      clock is not changed yet.
+      clock stays at 25 MHz on purpose: the console and UART2 work reliably
+      at this error, so the DISPPLL switch is not planned.
   - Both come from the SDK `cv181x_base.dtsi`.
   - **SPI2 clock (M4 research):** `clk_spi` = FPLL 1500 MHz / 8 = **187.5 MHz**
     (TRM `clock/clksource_preset_freq_div_param.table.rst:272`, `spi.rst`
