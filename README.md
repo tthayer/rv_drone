@@ -113,7 +113,7 @@ found`, and drives OLED 0 only.
 M5Stack Unit MIDI (Grove cable): white to GP21 (pin 27), red to VBUS (pin 40)
 (VSYS, pin 39, in the single-supply build), black to GND, mode switch on
 **Bypass**. See the architecture doc for the
-reasoning and what is still unverified about the 3.5 mm input.
+reasoning (the 3.5 mm TRS input is verified with the MicroFreak).
 
 The console (USB CDC) prints a banner (re-printed when a terminal connects),
 then `enc N delta D total T`, `sw N down|up` and `midi note_on ch C note N vel
