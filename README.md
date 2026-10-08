@@ -13,10 +13,13 @@ The design, pin maps, link protocols and milestones are in
 CPU budget) is documented in `docs/ENGINE.md`.
 
 **Current state (2026-10-07):** M0–M8 are done on hardware (M8: presets on
-SD survive a power cycle).
+SD survive a power cycle). The Nano now **boots standalone from SD**:
+`fip.bin` (built from `main`) is in the card's root next to `/presets/`, so
+the instrument comes up on its own at power-on with the last preset. To go
+back to the USB dev loop, remove or rename `fip.bin` on the card.
 
 - **Nano:** renders the drone engine (16 voices × 3–16 detuned or stacked oscillators,
-  filter, chorus, delay, FDN reverb with shimmer and freeze modes) at about 48 % CPU worst case (16 voices × 16 oscillators), streams it
+  filter, chorus, delay, FDN reverb with shimmer and freeze modes) at about 48 % CPU worst case (16 voices × 16 oscillators; 50 % with shimmer), streams it
   to Pico A over SPI2 DMA, owns the UI on all three OLEDs, follows MIDI clock,
   and saves/loads presets on the SD card.
 - **Pico A:** plays the Nano's audio from an 8-block ring (primed to 3 blocks,
@@ -226,6 +229,11 @@ To boot:
 4. UART0 (A16 TX / A17 RX, 115200 8N1) prints the boot log. A 5 V FTDI
    adapter needs a 1 kΩ / 1.8 kΩ divider on its TX line.
 
+The presets card works as the boot card: `fip.bin` sits in its root beside
+`/presets/` (verified 2026-10-07). macOS adds a `._fip.bin` metadata file
+when copying; it is harmless. To update the firmware, copy the new
+`build/nano/fip.bin` over the old one.
+
 ## Dev loop: USB boot (no SD card)
 
 With no bootable SD card in it, the Nano's mask ROM waits in USB download
@@ -252,7 +260,8 @@ no SD card, or one without `fip.bin`. A boot takes about 20–40 s.
 
 ## SD card and presets
 
-Use a FAT32 microSD **without `fip.bin`** so the ROM still falls through to USB
+The presets card can also hold `fip.bin` and boot the Nano (see "To boot");
+for the USB dev loop, leave `fip.bin` off it so the ROM falls through to USB
 boot. The card can be formatted by the Nano itself (console `F` twice), which
 erases it. Presets live in `/presets/P01.TXT`..`P16.TXT` (one `NAME=position`
 line per parameter, position 0..10000) and `/presets/LAST.TXT` names the slot
