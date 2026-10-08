@@ -72,10 +72,21 @@ into control blocks internally.
   buffers in one call (`osc_bank_scalar` or `osc_bank_rvv`). Phases are 32-bit
   fixed point (2^32 = one cycle), so wrapping is exact and costs nothing, and
   sample i's phase is `ph + i·inc`, which is easy to vectorise.
-- **Oscillator count:** OSCS, 3 to 7 per voice.
+- **Oscillator count:** OSCS, 3 to 16 per voice (7 until 2026-10-07). On the
+  Nano, plain-C mode (RVV off) caps it at 7 to stay real-time.
 - **Detune:** the oscillators are spread linearly across ±DETUNE cents. Each
   one also has its own **drift LFO**: a sine of ±(DRIFT × 10) cents at a
   random rate of 0.05–0.17 Hz. This slow beating is what makes the drone move.
+- **STACK** sets an interval and level for each oscillator, cycling through
+  the mode's table. Detune and drift still apply on top. An oscillator pushed
+  above 0.45·fs is muted rather than mistuned.
+
+  | STACK | Intervals (semitones) | Weights |
+  |---|---|---|
+  | UNISON | 0 | 1 |
+  | OCTAVES | 0, +12, −12, +24 | 1, .7, .8, .5 |
+  | FIFTHS | 0, +7, +12, +19, −12, +24 | 1, .8, .7, .55, .75, .45 |
+  | ORGAN | 0, +12, +19, +24, +28, +31, +36, −12 (8′ 4′ 2⅔′ 2′ 1⅗′ 1⅓′ 1′ 16′) | 1, .8, .6, .55, .45, .4, .35, .7 |
 - **Waveform:** a crossfade from sine to **polyBLEP saw**, set by SHAPE
   (0 = pure sine, 1 = band-limited saw).
 - **Stereo:** neighbouring oscillators are panned to opposite sides with an
@@ -190,7 +201,7 @@ exactly one step per encoder click, and ENUMs wrap around.
 | OSC | DETUNE | 0–50 cents | 12 c | lin | 20 |
 | OSC | DRIFT | 0–100 % (±10 c) | 30 % | lin | 21 |
 | OSC | SHAPE | sine → saw | 60 % | lin | 22 |
-| OSC | OSCS | 3–7 | 5 | int | 23 |
+| OSC | OSCS | 3–16 | 5 | int | 23 |
 | OSC | SUB | 0–100 % | 30 % | lin | 24 |
 | OSC | SPREAD | 0–100 % | 70 % | lin | 25 |
 | FILTER | CUTOFF | 40 Hz–12 kHz | 900 Hz | exp | 26, **74** |
@@ -214,12 +225,13 @@ exactly one step per encoder click, and ENUMs wrap around.
 | CLOCK | SYNC | OFF / MIDI | MIDI | enum | 44 |
 | CLOCK | LFO DIV | FREE, 1/4 … 8 BAR | FREE | enum | 45 |
 | CLOCK | DLY DIV | FREE, 1/16 … 1/2 | FREE | enum | 46 |
+| CLOCK/STACK | STACK | UNISON, OCTAVES, FIFTHS, ORGAN | UNISON | enum | 47 |
 
 CC values 0–127 map to a position of 0–1. CC 123 is All Notes Off.
 
 **UI:** the six encoders show the six parameters of the current page; each
 display shows two. Pushing encoder 1 steps through OSC → FILTER → SPACE → AMP
-→ CLOCK → PRESET. Pushing any other encoder resets its parameter to the
+→ CLOCK/STACK → PRESET. Pushing any other encoder resets its parameter to the
 default. The PRESET page is described in the README ("SD card and presets"):
 encoder 1 picks the slot, encoder 2 loads and encoder 3 saves. The right
 display previews the selected slot's stored settings: cutoff/reso, shape/detune,
@@ -227,7 +239,9 @@ oscs/sub, delay (time or division)/feedback, reverb/size, attack/release. The
 file is read when the page opens, when the slot changes and after a save,
 never from the draw path.
 Presets store every parameter's position by name, so adding a parameter later
-doesn't break older files.
+doesn't break older files. Files written since 2026-10-07 carry a `preset v2`
+header. Older v1 files stored OSCS as a position on the old 3–7 range, so they
+are converted on load to the same oscillator count.
 
 ## Running on the Nano
 
@@ -258,8 +272,11 @@ doesn't break older files.
   | silent (effects only) | ~93 µs | 7 % |
   | 2 voices × 5 osc (a D2 + A2 drone), M7 build | ~290 µs | 21 % |
   | 4 voices × 7 osc, M7 build | ~444 µs | 33 % |
-  | **16 voices × 7 osc (worst case, console `w`), RVV** | **~390 µs** | **29 %** |
+  | 16 voices × 7 osc, RVV | ~390 µs | 29 % |
   | 16 voices × 7 osc, scalar | ~976 µs | 73 % |
+  | **16 voices × 16 osc (worst case, console `w`), RVV** | **~648 µs** | **48 %** |
+  | 16 voices × 16 osc, scalar, uncapped | ~1795 µs | 134 %, not real-time, hence the scalar cap of 7 |
+  | 16 voices × 16 osc requested, scalar, capped at 7 | ~1001 µs | 75 % |
 
   The effects cost about 140 µs per block whatever the voice count. That figure
   is inferred from the measurements above, not measured on its own. The
@@ -456,8 +473,11 @@ doesn't break older files.
 
   Presets pick it up automatically.
 - **Tests:** `make test-presets` runs a preset round trip through the UI and
-  engine. `make test-engine` checks `dsp_exp2` accuracy, envelope release
-  timing, and that stolen voices fade out before switching notes.
+  engine, including v1 → v2 OSCS conversion. `make test-engine` checks:
+  - `dsp_exp2` accuracy;
+  - envelope release timing;
+  - that stolen voices fade out before switching notes;
+  - STACK partials, by Goertzel energy at 110/220/440/880 Hz.
 - **Measure on hardware:** console `w` sets up the worst-case load. The
   console's `engine:` and `prof` lines show the render time, overall and per
   stage. `v` switches between the scalar and RVV kernels; `x` reruns the

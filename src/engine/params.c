@@ -1,11 +1,12 @@
 #include "params.h"
 #include "dsp.h"
 
-const char *const page_names[PAGE_COUNT] = { "OSC", "FILTER", "SPACE", "AMP", "CLOCK" };
+const char *const page_names[PAGE_COUNT] = { "OSC", "FILTER", "SPACE", "AMP", "CLOCK/STACK" };
 
 static const char *const fmode_labels[] = { "LP", "BP" };
 static const char *const onoff_labels[] = { "OFF", "ON" };
 static const char *const sync_labels[] = { "OFF", "MIDI" };
+static const char *const stack_labels[] = { "UNISON", "OCTAVES", "FIFTHS", "ORGAN" };
 /* filter-LFO cycle length */
 static const char *const lfo_div_labels[] = { "FREE", "1/4", "1/2", "1 BT", "2 BT", "1 BAR", "2 BAR", "4 BAR", "8 BAR" };
 static const float lfo_div_beats[] = { 0, 0.25f, 0.5f, 1, 2, 4, 8, 16, 32 };
@@ -20,7 +21,7 @@ static const param_desc_t table[P_COUNT] = {
     [P_DETUNE]     = { "DETUNE",  0.0f,   50.0f,   12.0f, CURVE_LIN,  UNIT_CENTS, 0, 0.01f },
     [P_DRIFT]      = { "DRIFT",   0.0f,   1.0f,    0.3f,  CURVE_LIN,  UNIT_PCT,   0, 0.01f },
     [P_SHAPE]      = { "SHAPE",   0.0f,   1.0f,    0.6f,  CURVE_LIN,  UNIT_PCT,   0, 0.01f },
-    [P_OSCS]       = { "OSCS",    3.0f,   7.0f,    5.0f,  CURVE_INT,  UNIT_NONE,  0, 0.25f },
+    [P_OSCS]       = { "OSCS",    3.0f,   16.0f,   5.0f,  CURVE_INT,  UNIT_NONE,  0, 0.077f },
     [P_SUB]        = { "SUB",     0.0f,   1.0f,    0.3f,  CURVE_LIN,  UNIT_PCT,   0, 0.01f },
     [P_SPREAD]     = { "SPREAD",  0.0f,   1.0f,    0.7f,  CURVE_LIN,  UNIT_PCT,   0, 0.01f },
     [P_CUTOFF]     = { "CUTOFF",  40.0f,  12000.0f, 900.0f, CURVE_EXP, UNIT_HZ,   0, 0.005f },
@@ -44,6 +45,7 @@ static const param_desc_t table[P_COUNT] = {
     [P_SYNC]       = { "SYNC",    0.0f,   1.0f,    1.0f,  CURVE_ENUM, UNIT_NONE,  sync_labels, 0.5f },
     [P_LFO_DIV]    = { "LFO DIV", 0.0f,   8.0f,    0.0f,  CURVE_ENUM, UNIT_NONE,  lfo_div_labels, 0.125f },
     [P_DLY_DIV]    = { "DLY DIV", 0.0f,   6.0f,    0.0f,  CURVE_ENUM, UNIT_NONE,  dly_div_labels, 0.17f },
+    [P_STACK]      = { "STACK",   0.0f,   3.0f,    0.0f,  CURVE_ENUM, UNIT_NONE,  stack_labels, 0.34f },
 };
 
 const param_desc_t *param_desc(int id) { return &table[id]; }

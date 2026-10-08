@@ -499,8 +499,8 @@ Verified in emu: 120 BPM + 1 BAR → filter-LFO period 2.02 s; 90 BPM +
 chord. The engine starts silent; notes come from MIDI (it latched a D2 + A2
 drone at boot until 2026-10-07).
 CCs: 1 mod depth, 7 volume, 71 reso, 72 release, 73 attack, 74 cutoff,
-91 reverb, 93 chorus, 20–46 = parameters 0–26 in page order (44 SYNC,
-45 LFO DIV, 46 DLY DIV); 123 = all off.
+91 reverb, 93 chorus, 20–47 = parameters 0–27 in page order (44 SYNC,
+45 LFO DIV, 46 DLY DIV, 47 STACK); 123 = all off.
 
 ### Initial sketch
 

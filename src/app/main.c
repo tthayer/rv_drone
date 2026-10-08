@@ -429,6 +429,12 @@ void main(uint64_t hartid, uint64_t fdt)
                 continue;
             }
             if (c == 'x') { simd_selftest(); continue; }
+            if (c == 'a') {                        /* all notes off (e.g. after 'w') */
+                uint8_t cc[3] = { 0xB0, 123, 0 };
+                ui_midi(cc, 3, 0);
+                uart_puts("engine: all notes off\n");
+                continue;
+            }
             if (c == 'P') {                        /* dump every parameter's current value */
                 char v[16];
                 for (int id = 0; id < P_COUNT; id++) {

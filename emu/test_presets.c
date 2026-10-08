@@ -18,4 +18,9 @@ int main(void){ engine_init(48000); ui_init(); ui_set_store(&st);
  if (a2<a*0.999f||a2>a*1.001f||b2<b*0.99f||b2>b*1.01f) fails++;
  if(ui_preset_load(4)!=-2) fails++;
  engine_init(48000); ui_init(); ui_boot_preset(); if (engine_param(P_CUTOFF)<b*0.99f||engine_param(P_CUTOFF)>b*1.01f) fails++;
- printf("%s\n%.*s", fails?"FAILED":"preset round trip ok", 120, files[0][0]); return fails; }
+ /* v1 file (no "v2" header): OSCS stored as a position on the old 3..7 range */
+ { const char *v1 = "# rv_drone preset (NAME=position 0..10000)\nOSCS=5000\n";
+   wr("P09.TXT", v1, (int)strlen(v1));
+   engine_init(48000); ui_init();
+   if (ui_preset_load(9) || engine_param(P_OSCS) != 5.0f) { printf("v1 OSCS migration: got %.1f\n", engine_param(P_OSCS)); fails++; } }
+ printf("%s\n%.*s", fails?"FAILED":"preset round trip ok (+ v1 migration)", 120, files[0][0]); return fails; }

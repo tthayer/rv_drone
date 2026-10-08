@@ -6,7 +6,7 @@
 #define OSC_H
 #include <stdint.h>
 
-#define OSC_MAX 7
+#define OSC_MAX 16
 
 typedef struct {
     uint32_t ph[OSC_MAX];       /* phase at the start of the block */

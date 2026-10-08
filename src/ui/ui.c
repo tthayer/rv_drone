@@ -81,7 +81,7 @@ int ui_preset_save(int n)
     if (!store) return -1;
     static char buf[PRESET_MAX];
     char *b = buf, *end = buf + PRESET_MAX - 32;
-    const char *hdr = "# rv_drone preset (NAME=position 0..10000)\n";
+    const char *hdr = "# rv_drone preset v2 (NAME=position 0..10000)\n";
     while (*hdr) *b++ = *hdr++;
     for (int i = 0; i < P_COUNT && b < end; i++) {
         const char *nm = param_desc(i)->name;
@@ -140,7 +140,17 @@ static int read_preset(int n, float *out)
     if (len < 0) return -1;
     buf[len] = 0;
     for (int i = 0; i < P_COUNT; i++) out[i] = param_to_norm(i, param_desc(i)->def);
-    return parse_preset(buf, out) ? 0 : -3;
+    if (!parse_preset(buf, out)) return -3;
+    /* v1 files (no "preset v2" header) stored OSCS as a position on 3..7;
+     * convert to the same oscillator count on today's range. */
+    int v2 = 0;
+    for (char *c = buf; *c && *c != '\n'; c++)
+        if (c[0] == 'v' && c[1] == '2') v2 = 1;
+    if (!v2) {
+        float count = 3.0f + out[P_OSCS] * 4.0f;
+        out[P_OSCS] = param_to_norm(P_OSCS, (float)(int)(count + 0.5f));
+    }
+    return 0;
 }
 
 int ui_preset_load(int n)

@@ -15,7 +15,7 @@ CPU budget) is documented in `docs/ENGINE.md`.
 **Current state (2026-10-07):** M0–M7 are done on hardware; M8 (presets on
 SD) is working and awaiting its power-cycle test.
 
-- **Nano:** renders the drone engine (16 voices × 3–7 detuned oscillators,
+- **Nano:** renders the drone engine (16 voices × 3–16 detuned or stacked oscillators,
   filter, chorus, delay, FDN reverb) at about 33 % CPU worst case, streams it
   to Pico A over SPI2 DMA, owns the UI on all three OLEDs, follows MIDI clock,
   and saves/loads presets on the SD card.
@@ -271,8 +271,9 @@ and the console's real baud rate and UART clock source (`uart: ...`).
 | `d` | toggle SPI DMA ↔ polled for the audio link |
 | `t` | force one link transfer (scope trigger) |
 | `p` | toggle the M4 test pattern ↔ engine audio |
-| `w` | worst-case CPU load: OSCS 7, sixteen voices latched (loud: reboot or send CC 123 to stop) |
-| `v` | engine kernels RVV ↔ scalar (A/B timing; RVV only if the boot self-test passed) |
+| `w` | worst-case CPU load: OSCS at maximum (16), sixteen voices latched (loud: `a` stops it) |
+| `a` | all notes off |
+| `v` | engine kernels RVV ↔ scalar (A/B timing; RVV only if the boot self-test passed; scalar caps OSCS at 7 to stay real-time) |
 | `x` | rerun the scalar-vs-RVV kernel self-test |
 | `P` | print every engine parameter's current value (six per line) |
 | `c` | measure the C906 clock (rdcycle vs the 25 MHz timer) and print the clock registers |

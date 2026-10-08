@@ -36,6 +36,7 @@ typedef struct {
 /* A stolen voice fades to silence over this long before its new note starts,
  * instead of being cut off; at 30 ms the late start is hard to hear on a drone. */
 #define STEAL_FADE_S   0.03f
+#define SCALAR_MAX_OSC 7                /* oscillators per voice when RVV is off (Nano) */
 #define STEAL_DONE_ENV 1e-3f            /* "silent enough" to switch notes */
 
 static struct {
@@ -271,6 +272,17 @@ void engine_init(float sr)
     /* silent until a note arrives (MIDI, or the emulator's keyboard / --notes) */
 }
 
+/* STACK modes: semitone interval and level weight per oscillator (cycling).
+ * Detune spread and drift still apply on top. */
+typedef struct { int n; signed char semi[8]; float w[8]; } osc_stack_t;
+static const osc_stack_t stacks[4] = {
+    { 1, { 0 }, { 1.0f } },                                              /* UNISON */
+    { 4, { 0, 12, -12, 24 }, { 1.0f, 0.7f, 0.8f, 0.5f } },               /* OCTAVES */
+    { 6, { 0, 7, 12, 19, -12, 24 }, { 1.0f, 0.8f, 0.7f, 0.55f, 0.75f, 0.45f } },   /* FIFTHS */
+    { 8, { 0, 12, 19, 24, 28, 31, 36, -12 },                              /* ORGAN: 8' 4' 2 2/3' 2' 1 3/5' 1 1/3' 1' 16' */
+         { 1.0f, 0.8f, 0.6f, 0.55f, 0.45f, 0.4f, 0.35f, 0.7f } },
+};
+
 /* Control-rate update of one voice: increments, pans, envelope coefficient. */
 static void voice_control(voice_t *v, int nosc)
 {
@@ -278,21 +290,25 @@ static void voice_control(voice_t *v, int nosc)
     float det = E.p[P_DETUNE], drift = E.p[P_DRIFT] * 10.0f;   /* cents */
     float spread = E.p[P_SPREAD];
     float half = (float)(nosc - 1) * 0.5f;
+    int sm = (int)E.p[P_STACK];
+    const osc_stack_t *st = &stacks[sm < 0 || sm > 3 ? 0 : sm];
     for (int k = 0; k < nosc; k++) {
+        int si = k % st->n;
         float pos = half > 0 ? ((float)k - half) / half : 0.0f;        /* -1..1 */
         v->drift_ph[k] += v->drift_rate[k] * (float)CTRL * E.inv_sr;
         if (v->drift_ph[k] >= 1.0f) v->drift_ph[k] -= 1.0f;
-        float cents = det * pos + drift * dsp_sin1(v->drift_ph[k]);
+        float cents = det * pos + drift * dsp_sin1(v->drift_ph[k]) + 100.0f * (float)st->semi[si];
         float dt = f0 * dsp_exp2(cents * (1.0f / 1200.0f)) * E.inv_sr;
-        if (dt > 0.45f) dt = 0.45f;
+        float w = st->w[si];
+        if (dt > 0.45f) { dt = 0.45f; w = 0.0f; }      /* above the ceiling: mute, don't mistune */
         v->bank.inc[k] = (uint32_t)(dt * 4294967296.0f);
         v->bank.dt[k] = dt;
         v->bank.idt[k] = 1.0f / dt;
         /* alternate sides so neighbours in pitch sit apart; equal power */
         float pan = spread * ((k & 1) ? pos : -pos);
         float a = (pan + 1.0f) * 0.125f;                                /* 0..0.25 */
-        v->bank.gl[k] = dsp_sin1(0.25f - a);
-        v->bank.gr[k] = dsp_sin1(a);
+        v->bank.gl[k] = w * dsp_sin1(0.25f - a);
+        v->bank.gr[k] = w * dsp_sin1(a);
     }
     v->bank.n = nosc;
     v->sub_inc = (uint32_t)(f0 * 0.5f * E.inv_sr * 4294967296.0f);
@@ -301,7 +317,10 @@ static void voice_control(voice_t *v, int nosc)
                                 : v->gate ? E.p[P_ATTACK] : E.p[P_RELEASE], E.sr);
 }
 
-static const float osc_norm[MAX_OSC + 1] = { 0, 1, 0.71f, 0.58f, 0.5f, 0.45f, 0.41f, 0.38f };
+/* Level per oscillator count, ~1/sqrt(n), so changing OSCS doesn't jump the level. */
+static const float osc_norm[MAX_OSC + 1] = { 0, 1, 0.71f, 0.58f, 0.5f, 0.45f, 0.41f, 0.38f,
+    0.35f, 0.33f, 0.32f, 0.30f, 0.29f, 0.28f, 0.27f, 0.26f, 0.25f };
+
 
 /* Read `d` (fractional, >= 1) samples behind write index w, linear interpolation.
  * Integer index math: a float write counter would lose precision after 2^24. */
@@ -318,6 +337,12 @@ static void render_block(float *outl, float *outr, int n)
     int nosc = (int)E.p[P_OSCS];
     if (nosc < 1) nosc = 1;
     if (nosc > MAX_OSC) nosc = MAX_OSC;
+    /* Without the RVV kernels, 16 voices x 16 oscillators takes ~1800 us per block
+     * on the C906, over the 1333 us real-time budget. Plain C stays within budget
+     * up to 7 (measured 976 us), so cap there. The host emulator is unaffected. */
+#ifdef ENGINE_RVV
+    if (!E.simd && nosc > SCALAR_MAX_OSC) nosc = SCALAR_MAX_OSC;
+#endif
     float shape = E.p[P_SHAPE], sub = E.p[P_SUB];
     float norm = osc_norm[nosc] * 0.8f;
     E.cut_s += (E.p[P_CUTOFF] - E.cut_s) * 0.15f;

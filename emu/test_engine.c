@@ -66,7 +66,36 @@ int main(void)
     CHECK(steals > 0, "no voice was stolen (test setup)");
     CHECK(loud == 0, "%d stolen voices switched note while still audible", loud);
 
-    printf(fails ? "test_engine: %d FAILED\n" : "test_engine: all passed (exp2 %.1e, %d steals faded)\n",
-           fails ? fails : worst, steals);
+    /* 4. STACK intervals: one voice, pure sines, no detune/drift/effects. Energy at
+     * the expected partials of A3 (220 Hz): UNISON has no 440, OCTAVES does. */
+    double unison440 = 0, unison220 = 0, oct[4] = { 0 };
+    for (int mode = 0; mode < 2; mode++) {
+        engine_init(48000);
+        engine_set_param(P_ATTACK, 0.01f);
+        engine_set_param(P_OSCS, 4); engine_set_param(P_STACK, mode ? 1 : 0);
+        engine_set_param(P_DETUNE, 0); engine_set_param(P_DRIFT, 0); engine_set_param(P_SHAPE, 0);
+        engine_set_param(P_SUB, 0); engine_set_param(P_SPREAD, 0); engine_set_param(P_CUTOFF, 12000);
+        engine_set_param(P_FMOD_DEPTH, 0); engine_set_param(P_RESO, 0); engine_set_param(P_DRIVE, 0);
+        engine_set_param(P_CHORUS, 0); engine_set_param(P_DLY_MIX, 0); engine_set_param(P_REV_MIX, 0);
+        engine_note_on(57, 100);
+        static float buf[48000];
+        for (int s = 0; s < 48000; s += 32) engine_render(buf + s, r, 32);
+        const double f[5] = { 110, 220, 440, 880, 330 };
+        double e[5];
+        for (int j = 0; j < 5; j++) {                 /* Goertzel over the last 0.5 s */
+            double w = 2 * 3.14159265358979 * f[j] / 48000, c = 2 * cos(w), s1 = 0, s2 = 0;
+            for (int i = 24000; i < 48000; i++) { double s0 = buf[i] + c * s1 - s2; s2 = s1; s1 = s0; }
+            e[j] = sqrt(s1 * s1 + s2 * s2 - c * s1 * s2);
+        }
+        if (!mode) { unison220 = e[1]; unison440 = e[2]; }
+        else for (int j = 0; j < 4; j++) oct[j] = e[j];
+        if (mode) CHECK(e[4] < 0.05 * e[1], "OCTAVES: unexpected energy at 330 Hz");
+    }
+    CHECK(unison440 < 0.05 * unison220, "UNISON: energy at 440 Hz (%.3g vs %.3g)", unison440, unison220);
+    CHECK(oct[0] > 0.2 * oct[1] && oct[2] > 0.2 * oct[1] && oct[3] > 0.2 * oct[1],
+          "OCTAVES: missing partials (110 %.3g, 220 %.3g, 440 %.3g, 880 %.3g)", oct[0], oct[1], oct[2], oct[3]);
+
+    if (fails) printf("test_engine: %d FAILED\n", fails);
+    else printf("test_engine: all passed (exp2 %.1e, %d steals faded, STACK partials ok)\n", worst, steals);
     return fails != 0;
 }
