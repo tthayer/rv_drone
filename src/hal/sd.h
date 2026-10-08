@@ -11,7 +11,8 @@ typedef struct {
     int      sdhc;          /* block addressing */
     int      bus4;
     uint32_t cid[4], csd[4];
-    uint32_t clk_hz;        /* SD clock after init (assuming BOARD_SD_BASE_HZ) */
+    uint32_t clk_hz;        /* SD clock after init, from base_hz */
+    uint32_t base_hz;       /* clk_sd0 as decoded from CLKGEN (TRM field layout) */
 } sd_info_t;
 
 int  sd_init(void);                         /* 0 = card ready; <0 = step that failed */

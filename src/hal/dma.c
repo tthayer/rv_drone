@@ -9,7 +9,12 @@
  * 0x100 + 0x100*n, 64-bit registers). The vendor driver only ever uses linked
  * list transfers with the LLI in DDR; DMA_USE_LLI=1 (default) does the same
  * with one descriptor, DMA_USE_LLI=0 programs the channel registers directly
- * (contiguous multi-block type, TRM "Basic Transfer"). Both UNVERIFIED here. */
+ * (contiguous multi-block type, TRM "Basic Transfer"). DMA_USE_LLI=1 is verified
+ * on hardware; DMA_USE_LLI=0 is untested. Register offsets and bit positions
+ * match the TRM's dmac_registers table, except that it shows SRC_PER/DST_PER as
+ * single bits (39, 44) with 43:40 / 48:45 reserved, while `slot` here can be 0-7.
+ * The audio link only uses slots 0 and 1, which fit either reading; slots 2-7
+ * (3-bit field, as in the vendor driver) are untested. */
 #include "dma.h"
 #include "board.h"
 

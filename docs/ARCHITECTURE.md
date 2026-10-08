@@ -98,10 +98,12 @@ leaving a/b (left) and j (right) free. Every header GPIO is 3.3 V.
   - SPI2 is `snps,dw-apb-ssi` at 0x041A0000, with clock `CV181X_CLK_SPI`.
   - UART2 is `snps,dw-apb-uart` at 0x04160000, with a 25 MHz clock and
     reg-shift 2. FIFOs are 64 B each way (TRM §21.2.2).
-  - **UART clock** (TRM Table 8.4 and vendor `clk-cv181x.c`): every UART's
+  - **UART clock** (TRM clock chapter, `clksource_preset_freq_div_param`, and vendor `clk-cv181x.c`): every UART's
     SCLK is **`clk_cam0_200`**, shared by UART0–4. It is the 25 MHz xtal when
     `clk_byp_0[16] = 1` (the reset default), otherwise `div_clk_cam0_200`
-    (0x0A8; src 2 = DISPPLL, 1200 MHz by default).
+    (0x0A8; `clk_src` [9:8] 0 = xtal, 1 = DISPPLL per the TRM register table,
+    DISPPLL 1200 MHz by default; the vendor driver's parent list is
+    {osc, osc, disppll} instead, and `uart.c` follows the TRM).
     - The TRM's UART chapter (§21.2.4.1) instead describes `clk_sel_0` bits
       9–13 and 187.5 MHz. That contradicts the `clk_sel_0` register table
       (bits 22:1 reserved) and the vendor driver, so it is not used.
@@ -674,8 +676,13 @@ Behaviour:
   - `src/hal/sd.c`: polled SDHCI on SD0 (0x04310000, DWC MSHC). Setup per the
     vendor Linux driver: CLK_EN_0 bits 18–20, pads func 0 + pulls (FMUX
     0x900/0xA00–0xA14), SD_PWRSW_CTRL (0x030001F4) = 3.3 V, MSHC_CTRL /
-    PHY_TX_RX_DLY / PHY_CONFIG defaults after each reset. Base clock 375 MHz
-    assumed (DTS); identify at 400 kHz, then 4-bit at 23.4 MHz. SD0_PWR_EN
+    PHY_TX_RX_DLY / PHY_CONFIG defaults after each reset (the TRM names the
+    +0x200 register EMMC_CTRL). Base clock: the DTS says 375 MHz, the TRM's
+    `clk_sd0` preset is FPLL / 15 = 100 MHz, and we never write `div_clk_sd0`.
+    Since 2026-10-08 `sd.c` decodes the real value from CLKGEN (TRM field
+    layout) and reports it in the `sd:` line (`base N MHz`); dividers use the
+    larger of the two, so the card is never clocked faster than asked. With a
+    375 MHz base: identify at 400 kHz, then 4-bit at 23.4 MHz. SD0_PWR_EN
     stays the LED GPIO; the card works with it (card VDD is not gated by it).
     Long waits call an idle hook = `audio_link_poll`, so saves don't starve
     Pico A (0 underruns across a save).
@@ -698,8 +705,11 @@ Behaviour:
 ## References
 
 - SG2002 TRM: https://github.com/sophgo/sophgo-doc/tree/main/SG200X/TRM
-  (memory map: `system-architecture/memorymap_sg2002.table.rst`; IRQs:
-  `interrupts.table.rst`)
+  (register tables under `contents/cn/`: memory map
+  `system-architecture/memorymap_sg2002.table.rst`; IRQs `interrupts.table.rst`;
+  clocks `clock/div_crg_registers_description.table.rst` and
+  `clksource_preset_freq_div_param.table.rst`; resets
+  `reset/reset_registers_describe.table.rst`; DMA `dma/dmac_registers.table.rst`)
 - fiptool: https://github.com/sophgo/fiptool
 - FSBL source (boot flow, `reset_c906l`):
   https://github.com/milkv-duo/duo-buildroot-sdk, under `fsbl/plat/cv181x/`
@@ -740,13 +750,35 @@ Behaviour:
   `cvirtos` there was an "RT: … CVIRTOS" line from the C906L; with
   `park.bin` there is none (checked 2026-10-07).
 
-### Unverified (from research; confirm on hardware)
+### Checked against the TRM (2026-10-08)
 
-- That SPI2 really runs at 187.5 MHz as decoded, that a 528 B frame streams
-  back to back in mode 3, and GPIO0's PLIC source (60). M4 checks these.
-- That SD is SDHCI.
-- **SPI2 DMA:** DMAC register layout and single-LLI transfers with 8-bit beats,
-  the handshake remap, the DMA IRQ route (int_mux), S-mode T-Head CMO and
-  CS-low-to-first-SCK latency (a few us with DMA vs ~0 polled).
-- **Little core:** the top 2 MB (0x8FE00000+) stays reserved in the DTS for
-  it, unused while it is parked.
+Every base address, register offset, bit, IRQ number and clock in `src/hal`,
+`src/drivers` and `board_nano.h` was checked against the TRM sources
+(sophgo-doc `SG200X/TRM`; register tables are under `contents/cn/`, English
+field names).
+
+- **Confirmed by the TRM and working on hardware:** the memory map (UART0/2,
+  PLIC, SPI2, GPIO0, RTC GPIO, sysDMA, SD0, CLKGEN, RSTGEN, PINMUX block); the
+  C906 interrupt numbers (UART0 44, UART2 46, GPIO0 60, sysDMA 29, from the
+  "Master RISCV C906" table; A53 and little-core numbers differ); clock gates,
+  bypass bits, dividers and resets for SPI2, UART2, SD0 and sysDMA; FPLL 1500 MHz
+  and `clk_spi` = FPLL / 8 = 187.5 MHz (SCK 7.8125 MHz = 187.5 / 24); MPLL
+  integer mode (1050 MHz = 25 × 42); the SPI, GPIO, UART and DMAC register
+  layouts; the DMA remap (0x154/0x158), `int_mux` [18:10] and SPI2 request
+  numbers 20/21; SD_PWRSW 0x9 = enabled, 3.3 V; the RTC warm-reset sequence.
+- **Fixed after the check:** `div_clk_cam0_200` source encoding in `uart.c`
+  (TRM: 1 = DISPPLL, not 2); the SD base clock is now decoded, not assumed
+  (above); comments citing a "TRM Table 8.4" that doesn't exist.
+- **Not in the TRM** (other sources, all working on hardware): pad FMUX
+  offsets and function numbers (the TRM defers them to `SG2002_PINOUT.xlsx`;
+  ours come from the SDK pinlist headers); SD pad pulls (vendor driver); the
+  C906 time CSR's 25 MHz clock (measured); PLIC register layout and the T-Head
+  S-mode gate (RISC-V / T-Head docs); cache line size, XTheadCmo and the vector
+  unit's VLEN (C906 manual, VLEN measured); `int_mux` cpu1 = the big C906
+  (SDK DTS); the little core's reserved 0x8FE00000+ (DTS).
+- **TRM inconsistencies:** the UART chapter's `clk_sel_0` bits 9–13 vs the
+  register table (reserved); the 128 KB L2 is on the main C906 only in Diagram
+  2.1, not the prose; DMAC `SRC_PER`/`DST_PER` shown as single bits (we only
+  use handshake slots 0 and 1).
+- **Still open:** the SD base clock's real value (shown at the next boot), and
+  DMA without an LLI (`DMA_USE_LLI=0`, untested).

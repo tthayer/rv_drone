@@ -1,6 +1,6 @@
 /* Minimal PLIC driver, S-mode context of hart 0.
- * Nano: "thead,c900-plic" at 0x70000000 (UNVERIFIED); OpenSBI sets the T-Head
- * S-mode access-control bit, we do not touch it. */
+ * Nano: "thead,c900-plic" at 0x70000000 (TRM memory map; verified on hardware);
+ * OpenSBI sets the T-Head S-mode access-control bit, we do not touch it. */
 #include "plic.h"
 #include "board.h"
 #include "uart.h"

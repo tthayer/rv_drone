@@ -85,7 +85,9 @@ void preset_fs_info(void)
     uart_puts(i->sdhc ? "SDHC/XC, " : "SDSC, ");
     uart_puts(i->bus4 ? "4-bit, " : "1-bit, ");
     uart_put_dec(i->clk_hz / 1000);
-    uart_puts(" kHz; ");
+    uart_puts(" kHz (base ");
+    uart_put_dec(i->base_hz / 1000000);
+    uart_puts(" MHz); ");
     if (m) {
         uart_puts("mount failed (FRESULT ");
         uart_put_dec((uint64_t)m);

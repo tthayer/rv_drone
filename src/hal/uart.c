@@ -163,10 +163,13 @@ void uart_dump_regs(void)
 }
 
 /* Read-only report of the console's real baud rate. The UART clock is
- * clk_cam0_200, shared by UART0..4 (SG2002 TRM Table 8.4; vendor clk-cv181x.c):
- * xtal 25 MHz when clk_byp_0[16] = 1 (the reset default), else
- * div_clk_cam0_200 (src [9:8] = 2: DISPPLL, factor [20:16]). Reads the divisor
- * latch (DLAB briefly set, line idle, polled mode). Call before uart_async_tx(1). */
+ * clk_cam0_200, shared by UART0..4 (SG2002 TRM clock chapter,
+ * clksource_preset_freq_div_param: clk_uart0..4 <- clk_cam0_200, preset xtal 25 MHz):
+ * xtal when clk_byp_0[16] = 1 (the reset default), else div_clk_cam0_200 (0x0A8:
+ * [9:8] src 0 = xtal, 1 = DISPPLL per the TRM register table; [3] use the
+ * [20:16] factor). The vendor clk-cv181x.c lists the parents as {osc, osc,
+ * disppll} instead; this follows the TRM. Reads the divisor latch (DLAB briefly
+ * set, line idle, polled mode). Call before uart_async_tx(1). */
 #define UART_LCR 3
 #define UART_DLL 0
 #define UART_DLH 1
@@ -186,10 +189,9 @@ void uart_report_clock(void)
     *reg(UART_LCR) = lcr;
     uint32_t byp = *(volatile uint32_t *)(uintptr_t)(BOARD_CLKGEN_BASE + 0x030);
     uint32_t dcam = *(volatile uint32_t *)(uintptr_t)(BOARD_CLKGEN_BASE + 0x0A8);
-    /* xtal if bypassed, or if the divider's source is 0/1 (both osc in the vendor
-     * driver's parent list {osc, osc, disppll}) with factor 1. */
+    /* xtal if bypassed, or if the divider's source is xtal (0) with factor 1. */
     uint32_t src = (dcam >> 8) & 3, fac = (dcam >> 16) & 31;
-    int xtal = ((byp >> 16) & 1) || (src < 2 && fac <= 1);
+    int xtal = ((byp >> 16) & 1) || (src == 0 && fac <= 1);
     uart_puts("uart: clk_cam0_200 ");
     if (xtal) {
         uart_puts(((byp >> 16) & 1) ? "= xtal 25 MHz (bypass)" : "= osc 25 MHz (src 0, /1)");

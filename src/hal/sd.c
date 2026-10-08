@@ -1,8 +1,13 @@
 /* SD0 driver: standard SDHCI register interface (DWC MSHC), polled PIO.
  * Platform setup follows the vendor Linux driver (sdhci-cv181x.c): clock gates,
  * pads (func 0) + pulls, PWRSW 3.3 V, then after every reset the MSHC/PHY
- * defaults for default speed. The base clock is 375 MHz (DTS src-frequency);
- * if it is lower, every SD clock here only gets slower (safe). */
+ * defaults for default speed.
+ * Base clock (clk_sd0): the vendor DTS says src-frequency 375 MHz (FPLL / 4);
+ * the TRM's reset preset is FPLL / 15 = 100 MHz (clksource_preset_freq_div_param),
+ * and we never write div_clk_sd0, so the value is whatever the boot chain left.
+ * Dividers are computed from BOARD_SD_BASE_HZ or the decoded value, whichever is
+ * higher, so the card is never clocked faster than asked; info.base_hz and
+ * info.clk_hz report the decoded (real) clocks. */
 #include "sd.h"
 #include "board.h"
 
@@ -67,8 +72,12 @@ void sd_dump(void) {}
 
 /* clocks / pads (FMUX base + offsets), PWRSW */
 #define CLK_EN_0      (BOARD_CLKGEN_BASE + 0x000)    /* 18 axi4_sd0, 19 sd0, 20 100k_sd0 */
-#define CLK_DIV_SD0   (BOARD_CLKGEN_BASE + 0x070)
-#define CLK_BYP_0     (BOARD_CLKGEN_BASE + 0x030)
+#define CLK_DIV_SD0   (BOARD_CLKGEN_BASE + 0x070)    /* [3] use [20:16] factor, [9:8] 0 fpll 1 disppll */
+#define CLK_BYP_0     (BOARD_CLKGEN_BASE + 0x030)    /* bit 6: clk_sd0 bypassed to xtal */
+#define FPLL_CSR      (BOARD_CLKGEN_BASE + 0x910)    /* [6:0] pre, [14:8] post, [23:17] div */
+#define SD_XTAL_HZ    25000000u
+#define FPLL_PRESET   1500000000u                    /* TRM pll_configure_params */
+#define DISPPLL_PRESET 1200000000u
 #define SD_PWRSW_CTRL (BOARD_SYSCTL_BASE + 0x1F4)
 #define FMUX(o)       (BOARD_FMUX_BASE + (o))
 
@@ -121,6 +130,8 @@ void sd_dump(void)
 
 static void vendor_defaults(void)
 {
+    /* TRM name EMMC_CTRL (+0x200): LATANCY_1T, EMMC_RSTN, EMMC_RSTN_OEN. These
+     * are reset-default 1s; kept as the vendor driver writes them. */
     R32(SD(MSHC_CTRL)) |= (1u << 1) | (1u << 8) | (1u << 9);
     R32(SD(PHY_TX_RX_DLY)) = 0x01000100;
     R32(SD(PHY_CONFIG)) = 1;
@@ -138,10 +149,32 @@ static int reset(uint8_t what)
     return 0;
 }
 
+/* clk_sd0 from the CLKGEN registers, decoded per the TRM (div_clk_sd0, clk_byp_0,
+ * fpll_csr). The factor's "initial value" (bit 3 clear) is the preset /15. */
+static uint32_t base_clock(void)
+{
+    if (R32(CLK_BYP_0) & (1u << 6))
+        return SD_XTAL_HZ;
+    uint32_t d = R32(CLK_DIV_SD0);
+    uint32_t fac = (d & 8u) ? (d >> 16) & 0x1f : 15u;
+    if (fac == 0)
+        fac = 1;
+    uint64_t pll = DISPPLL_PRESET;
+    if (((d >> 8) & 3) == 0) {
+        uint32_t c = R32(FPLL_CSR);
+        uint32_t pre = c & 0x7f, post = (c >> 8) & 0x7f, div = (c >> 17) & 0x7f;
+        pll = (pre && post && div) ? (uint64_t)SD_XTAL_HZ * div / (pre * post) : 0;
+        if (pll < 400000000u || pll > 2000000000u)   /* doesn't look like FPLL */
+            pll = FPLL_PRESET;
+    }
+    return (uint32_t)(pll / fac);
+}
+
 /* SD clock = base / (2 * div), div 1..1023 (0 = base). */
 static int set_clock(uint32_t hz)
 {
-    uint32_t div = (BOARD_SD_BASE_HZ + 2 * hz - 1) / (2 * hz);
+    uint32_t base = info.base_hz > BOARD_SD_BASE_HZ ? info.base_hz : BOARD_SD_BASE_HZ;
+    uint32_t div = (base + 2 * hz - 1) / (2 * hz);
     if (div > 1023) div = 1023;
     R16(SD(CLKCTL)) = 0;
     uint16_t v = (uint16_t)(((div & 0xff) << 8) | ((div >> 8) << 6) | 0x1);   /* internal on */
@@ -149,7 +182,7 @@ static int set_clock(uint32_t hz)
     if (wait16(CLKCTL, 0x2, 0x2, 20))
         return -1;
     R16(SD(CLKCTL)) = v | 0x4;                       /* SD clock on */
-    info.clk_hz = BOARD_SD_BASE_HZ / (2 * div);
+    info.clk_hz = info.base_hz / (2 * div);
     delay_us(100);
     return 0;
 }
@@ -213,6 +246,7 @@ int sd_init(void)
 {
     uint32_t r[4];
     info = (sd_info_t){ 0 };
+    info.base_hz = base_clock();
     pads_and_power();
     if (reset(0x1))
         return -1;
