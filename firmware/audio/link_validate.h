@@ -24,8 +24,14 @@ typedef enum { LINK_OK = 0, LINK_CRC, LINK_MAGIC, LINK_PATTERN } link_result_t;
 // caused by that same corruption. Only a fully good frame updates last_seq and
 // the gap count.
 link_result_t link_validate(link_stats_t *s, const rvlink_m2s_t *f);
+// Same, with the CRC verdict supplied (Pico A's DMA sniffer computes it in hardware).
+link_result_t link_validate_crc(link_stats_t *s, const rvlink_m2s_t *f, int crc_ok);
 
-// Fills and seals the next reply. pad[i] = (uint8_t)(0xA5 ^ i).
+// Fills the next reply without the CRC (the caller seals it, in hardware or with
+// rvlink_seal). pad[i] = (uint8_t)(0xA5 ^ i).
+void link_build_reply_body(const link_stats_t *s, uint32_t underruns, uint32_t ring_fill,
+                           rvlink_s2m_t *out);
+// Fills and seals the next reply (software CRC).
 void link_build_reply(const link_stats_t *s, uint32_t underruns, uint32_t ring_fill,
                       rvlink_s2m_t *out);
 

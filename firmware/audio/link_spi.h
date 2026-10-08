@@ -20,4 +20,10 @@ void link_spi_get_stats(link_stats_t *out);
 // DRQ requests raised right after a frame because the ring was still short.
 uint32_t link_spi_catchups(void);
 
+// 1 = frames are CRC-checked and replies sealed by the DMA sniffer (boot self-test
+// passed), 0 = software CRC. crc_mismatch counts once-a-second cross-checks
+// where the hardware verdict disagreed with the software CRC (expect 0).
+int link_spi_hw_crc(void);
+uint32_t link_spi_crc_mismatch(void);
+
 #endif

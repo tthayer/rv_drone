@@ -15,13 +15,16 @@
 typedef struct {
     uint8_t buf[FB_PAGES][FB_W];
     uint8_t dirty;                  // bit p set = page p needs flushing
+    uint8_t lo[FB_PAGES], hi[FB_PAGES];  // dirty column range of page p (valid while dirty)
 } fb_t;
 
 void fb_clear(fb_t *fb);                                // all off; marks changed pages
 void fb_set_page(fb_t *fb, unsigned page, const uint8_t data[FB_W]);
 void fb_mark_all_dirty(fb_t *fb);
+// Marks columns lo..hi of page p dirty, widening any range already pending.
+void fb_mark_dirty(fb_t *fb, unsigned page, unsigned lo, unsigned hi);
 
-// Copies src into dst, marking only the pages whose contents differ.
+// Copies src into dst, marking only the pages (and column ranges) that differ.
 void fb_update(fb_t *dst, const fb_t *src);
 
 void fb_pixel(fb_t *fb, int x, int y, bool on);         // clipped

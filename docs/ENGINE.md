@@ -261,8 +261,8 @@ are converted on load to the same oscillator count.
   emulator locks the SDL audio device around UI calls instead.
 - **SD stalls:** long SD waits call `audio_link_poll()` as an idle hook, so
   rendering continues while a preset saves.
-- **Latency:** Pico A's 4-block buffer plus one block in flight is about
-  6.7 ms from render to DAC. MIDI note and parameter changes take effect at
+- **Latency:** Pico A's buffer is primed to 3 blocks. With one block in
+  flight, that's about 5.3 ms from render to DAC (it was 6.7 ms at 4 blocks). MIDI note and parameter changes take effect at
   the next render, so they're quantised to block boundaries of 1.33 ms.
 - **CPU cost** (C906, `-O2`, no vector instructions yet), per 64-frame block
   out of a 1333 µs budget:

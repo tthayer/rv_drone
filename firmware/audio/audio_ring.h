@@ -12,7 +12,7 @@
 #include "rvlink.h"
 
 #define AUDIO_RING_BLOCKS   8u      // power of two
-#define AUDIO_RING_TARGET   4u      // fill to prime to / keep requesting up to (5.3 ms)
+#define AUDIO_RING_TARGET   3u      // fill to prime to / keep requesting up to (4.0 ms)
 #define AUDIO_RING_WORDS    (RVLINK_BLOCK_FRAMES * 2u)
 
 typedef struct {

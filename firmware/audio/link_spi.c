@@ -54,6 +54,52 @@
 #define PRIO_LINK        0x80
 #define CATCHUP_DELAY_US 30u     // > the Nano's 20 us DRQ hold-off
 
+// CRC in hardware: the DMA sniffer (CRC-32 on bit-reversed data, output reversed
+// and inverted, seed ~0 = zlib's CRC-32) watches the RX channel, so a frame is
+// checked as it arrives. Over the whole frame including its stored CRC, a good
+// frame leaves the residue RVLINK_CRC_RESIDUE. Between frames the same sniffer
+// seals the reply via a mem-to-null DMA channel. Verified at boot against the
+// software CRC; on any mismatch the link stays on software CRC.
+#define RVLINK_CRC_RESIDUE 0x2144DF1Cu
+#define SNIFF_MODE         DMA_SNIFF_CTRL_CALC_VALUE_CRC32R
+static int sniff_ok;
+static int crc_ch;
+static uint32_t crc_sink;
+static uint32_t crc_checks, crc_mismatch;      // once-a-second hw vs sw cross-check
+
+static void sniff_setup(uint ch) {
+    dma_sniffer_set_output_reverse_enabled(true);
+    dma_sniffer_set_output_invert_enabled(true);
+    dma_sniffer_set_byte_swap_enabled(false);
+    dma_sniffer_enable(ch, SNIFF_MODE, false);
+    dma_sniffer_set_data_accumulator(0xFFFFFFFFu);
+}
+
+// CRC-32 of n bytes with the sniffer, via a byte DMA into a fixed sink. Blocking (~n cycles).
+static uint32_t hw_crc32(const void *buf, size_t n) {
+    dma_channel_config c = dma_channel_get_default_config(crc_ch);
+    channel_config_set_transfer_data_size(&c, DMA_SIZE_8);
+    channel_config_set_read_increment(&c, true);
+    channel_config_set_write_increment(&c, false);
+    channel_config_set_sniff_enable(&c, true);
+    sniff_setup(crc_ch);
+    dma_channel_configure(crc_ch, &c, &crc_sink, buf, n, true);
+    dma_channel_wait_for_finish_blocking(crc_ch);
+    return dma_sniffer_get_data_accumulator();
+}
+
+static int sniff_selftest(void) {
+    static uint8_t t[RVLINK_FRAME_LEN];
+    uint32_t x = 0x12345678u;
+    for (int round = 0; round < 4; round++) {
+        for (size_t i = 0; i < sizeof t; i++) { x ^= x << 13; x ^= x >> 17; x ^= x << 5; t[i] = (uint8_t)x; }
+        size_t n = round == 0 ? 9 : RVLINK_FRAME_LEN - 4;
+        if (round == 0) memcpy(t, "123456789", 9);           // check value 0xCBF43926
+        if (hw_crc32(t, n) != rvlink_crc32(t, n)) return 0;
+    }
+    return 1;
+}
+
 static rvlink_m2s_t rx_buf __attribute__((aligned(4)));
 static rvlink_s2m_t tx_buf __attribute__((aligned(4)));
 static link_stats_t stats;
@@ -91,6 +137,10 @@ static void dma_setup_and_enable(void) {
     channel_config_set_read_increment(&c, false);
     channel_config_set_write_increment(&c, true);
     channel_config_set_dreq(&c, pio_get_dreq(link_pio, link_sm, false));
+    if (sniff_ok) {
+        channel_config_set_sniff_enable(&c, true);
+        sniff_setup(rx_ch);                 // seed before the first byte arrives
+    }
     dma_channel_configure(rx_ch, &c, &rx_buf, (const void *)&link_pio->rxf[link_sm],
                           RVLINK_FRAME_LEN, true);
 
@@ -108,8 +158,19 @@ static uint32_t last_rem = RVLINK_FRAME_LEN;   // rx remaining at the last tick
 static void link_arm(bool new_reply) {
     last_rem = RVLINK_FRAME_LEN;
     link_armed = false;
-    if (new_reply)
-        link_build_reply(&stats, ring->underruns, audio_ring_fill(ring), &tx_buf);
+    if (new_reply) {
+        if (sniff_ok) {
+            link_build_reply_body(&stats, ring->underruns, audio_ring_fill(ring), &tx_buf);
+            uint32_t c = hw_crc32(&tx_buf, RVLINK_FRAME_LEN - 4);
+            uint8_t *f = (uint8_t *)&tx_buf;
+            f[RVLINK_FRAME_LEN - 4] = (uint8_t)c;
+            f[RVLINK_FRAME_LEN - 3] = (uint8_t)(c >> 8);
+            f[RVLINK_FRAME_LEN - 2] = (uint8_t)(c >> 16);
+            f[RVLINK_FRAME_LEN - 1] = (uint8_t)(c >> 24);
+        } else {
+            link_build_reply(&stats, ring->underruns, audio_ring_fill(ring), &tx_buf);
+        }
+    }
     dma_setup_and_enable();
 }
 
@@ -120,7 +181,16 @@ static void __isr link_dma_irq(void) {
     uint32_t t_end = time_us_32();
     link_armed = false;
     gpio_put(PIN_DRQ, 0);
-    if (link_validate(&stats, &rx_buf) == LINK_OK && !(rx_buf.flags & RVLINK_F_TEST))
+    link_result_t res;
+    if (sniff_ok) {
+        int hw_good = dma_sniffer_get_data_accumulator() == RVLINK_CRC_RESIDUE;
+        if (++crc_checks % 750 == 0 && hw_good != rvlink_check(&rx_buf))
+            crc_mismatch++;                 // once a second: hardware verdict vs software
+        res = link_validate_crc(&stats, &rx_buf, hw_good);
+    } else {
+        res = link_validate(&stats, &rx_buf);
+    }
+    if (res == LINK_OK && !(rx_buf.flags & RVLINK_F_TEST))
         audio_ring_push(ring, (const int32_t *)rx_buf.audio);
     link_arm(true);
     // Still short: ask again now rather than at the next tick, so priming and
@@ -171,6 +241,9 @@ void link_spi_get_stats(link_stats_t *out) { *out = stats; }
 
 uint32_t link_spi_catchups(void) { return stats_catchups; }
 
+int link_spi_hw_crc(void) { return sniff_ok; }
+uint32_t link_spi_crc_mismatch(void) { return crc_mismatch; }
+
 void link_spi_init(audio_ring_t *r) {
     ring = r;
     memset(&stats, 0, sizeof stats);
@@ -186,6 +259,8 @@ void link_spi_init(audio_ring_t *r) {
 
     rx_ch = dma_claim_unused_channel(true);
     tx_ch = dma_claim_unused_channel(true);
+    crc_ch = dma_claim_unused_channel(true);
+    sniff_ok = sniff_selftest();
     dma_channel_set_irq1_enabled(rx_ch, true);
     irq_set_exclusive_handler(LINK_IRQ, link_dma_irq);
     irq_set_priority(LINK_IRQ, PRIO_LINK);

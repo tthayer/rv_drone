@@ -77,17 +77,17 @@ connectors:
     pinlabels: [A, B, C (common), SW1, SW2]
   OLED0:
     type: OLED 0 SSD1306 128x64
-    subtype: I2C0 0x3C
+    subtype: I2C0 0x3C, 1 MHz (400 kHz fallback) - needs the module's pull-ups
     pins: [1, 2, 3, 4]
     pinlabels: [GND, VCC, SCL, SDA]
   OLED1:
     type: OLED 1 SSD1306 128x64
-    subtype: I2C0 0x3D (addr resistor moved)
+    subtype: I2C0 0x3D (addr resistor moved), 1 MHz (400 kHz fallback) - needs the module's pull-ups
     pins: [1, 2, 3, 4]
     pinlabels: [GND, VCC, SCL, SDA]
   OLED2:
     type: OLED 2 SSD1306 128x64
-    subtype: I2C1 0x3C
+    subtype: I2C1 0x3C, 1 MHz (400 kHz fallback) - needs the module's pull-ups
     pins: [1, 2, 3, 4]
     pinlabels: [GND, VCC, SCL, SDA]
   MIDI:
