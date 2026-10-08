@@ -286,6 +286,19 @@ Its schematic is `SCH_UnitMIDI_B04`, dated 2024-07-08.
 
     Software mitigations not yet tried: lower SPI pad drive strength, slower
     SCK.
+- **Known issue (2026-10-07, resolved): noise while holding a key on an
+  external MIDI keyboard.**
+  - **Symptom:** with the MicroFreak connected, the audio distorted or buzzed
+    only while a key was held, and got worse when a ground wire was touched.
+  - **Diagnosis:** with LATCH on the engine state doesn't change between held
+    and released, and the Nano's `out:` meter stayed around −16 dBFS. It was
+    a **ground loop**: the MicroFreak and rv_drone ran from different power
+    sources, joined through the MIDI cable and the audio, and the player's
+    hand on the touch keyboard closed the loop.
+  - **Fix:** power the MicroFreak from **the same USB power source** as
+    rv_drone. Generally: give connected gear one ground reference (same
+    supply or power strip), or use a ground-loop isolator on the audio
+    output.
 - **Errors:** a CRC failure drops the block (Pico A plays silence for it)
   and bumps a counter. A sequence gap counts as an underrun.
 - **Latency:** at most 4 × 64 frames ≈ 5.3 ms. The Nano always has the next
