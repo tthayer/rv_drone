@@ -358,7 +358,9 @@ Its schematic is `SCH_UnitMIDI_B04`, dated 2024-07-08.
 - **I2C refresh (Pico B):**
   - Both buses probe and initialise at 400 kHz, then switch to **1 MHz**
     (Fast-mode Plus) if every display ACKs a NOP at that speed, else they stay
-    at 400 kHz. The banner prints the speed.
+    at 400 kHz. The banner prints the speed. Verified on hardware
+    (2026-10-07): `I2C 1000 kHz, display writer on core 1`, all 3 OLEDs ok,
+    0 write errors.
   - 1 MHz relies on the OLED modules' own pull-ups (typically 4.7–10 kΩ).
   - Only each page's **changed column range** is sent (`fb_t.lo/hi`,
     `ssd1306_write_range`), so turning a knob rewrites a few dozen bytes

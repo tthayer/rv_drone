@@ -19,7 +19,8 @@ SD survive a power cycle).
   filter, chorus, delay, FDN reverb) at about 33 % CPU worst case, streams it
   to Pico A over SPI2 DMA, owns the UI on all three OLEDs, follows MIDI clock,
   and saves/loads presets on the SD card.
-- **Pico A:** plays the Nano's audio from an 8-block ring through the PCM5102A.
+- **Pico A:** plays the Nano's audio from an 8-block ring (primed to 3 blocks,
+  frames checked by the DMA sniffer's hardware CRC) through the PCM5102A.
 - **Pico B:** forwards encoders, switches, MIDI and MIDI clock; draws the
   Nano's display pages.
 - **Mac:** the same engine and UI run in an SDL2 emulator (`make emu`).
