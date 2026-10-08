@@ -113,9 +113,7 @@ found`, and drives OLED 0 only.
 M5Stack Unit MIDI (Grove cable): white to GP21 (pin 27), red to VBUS (pin 40)
 (VSYS, pin 39, in the single-supply build), black to GND, mode switch on
 **Bypass**. See the architecture doc for the
-reasoning. **MicroFreak:** its TRS MIDI is Type B, which doesn't work with a
-straight cable into the Unit MIDI's 3.5 mm jack. Use its grey TRS-to-DIN
-adapter into the Unit MIDI's DIN input, or a Type A↔B converter.
+reasoning.
 
 The console (USB CDC) prints a banner (re-printed when a terminal connects),
 then `enc N delta D total T`, `sw N down|up` and `midi note_on ch C note N vel
