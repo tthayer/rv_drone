@@ -25,7 +25,8 @@
  * smears into the shimmer; more taps or longer sweeps cancel on some notes. */
 #define SHIM_N      8192
 #define SHIM_W      4096.0f
-#define SHIM_MIN    32.0f               /* shortest tap delay, samples */
+#define SHIM_MIN    32.0f               /* shortest tap delay, samples: >= CTRL (see the pre-pass) */
+_Static_assert((int)SHIM_MIN >= CTRL, "the shimmer pre-pass must only read earlier blocks");
 /* Feedback at SHIMMER 100 %. Host sweep (3-note chord, every mode, SIZE 0..1,
  * DAMP 0 / 0.5): the loop sustains itself above 0.19 at worst (OCT, DAMP 0,
  * SIZE 0.75); 0.15 keeps every tail decaying. */
@@ -523,6 +524,8 @@ static void render_block(float *outl, float *outr, int n)
     float shim_t = (rmode > REV_HALL && rmode < REV_FREEZE) ? E.p[P_SHIMMER] : 0.0f;
     float shim_step = rmode > REV_HALL && rmode < REV_FREEZE ? (1.0f - shim_ratio[rmode]) / SHIM_W : 0.0f;
     float rin_t = freeze ? 0.0f : 0.3f;
+    int shim_on = shim_t > 0.0f || E.shim_s > 1e-4f;
+    if (!shim_on) E.shim_s = 0.0f;
     E.cho_ph += 0.23f * (float)n * E.inv_sr;
     if (E.cho_ph >= 1.0f) E.cho_ph -= 1.0f;
     float vol_t = E.p[P_VOLUME] * E.p[P_VOLUME];
@@ -559,6 +562,31 @@ static void render_block(float *outl, float *outr, int n)
         outr[i] = r + dmix * yr;
     }
     uint64_t t2 = E.now ? E.now() : 0;
+    /* Shimmer pre-pass: pitch-shift the reverb's wet sum (written below, one
+     * sample per frame), band-limit it and turn it into feedback for this
+     * block. Every tap is at least SHIM_MIN >= CTRL samples old, so it only
+     * reads earlier blocks and can run ahead of the reverb loop. Skipped in
+     * HALL/FREEZE once the feedback has faded out. */
+    float shim_fb[CTRL];
+    for (int i = 0; i < n; i++) shim_fb[i] = 0.0f;
+    if (shim_on) {
+        for (int i = 0; i < n; i++) {
+            uint32_t w = E.shim_w + (uint32_t)i;
+            float p1 = E.shim_ph, p2 = p1 + 0.5f;
+            if (p2 >= 1.0f) p2 -= 1.0f;
+            float s1 = tap(E.shim, SHIM_N - 1, w, SHIM_MIN + p1 * SHIM_W);
+            float s2 = tap(E.shim, SHIM_N - 1, w, SHIM_MIN + p2 * SHIM_W);
+            float g1 = 0.5f - 0.5f * dsp_sin1(p1 + 0.25f);     /* Hann: sin^2(pi p1) */
+            float sh = s1 * g1 + s2 * (1.0f - g1);
+            E.shim_ph += shim_step;
+            if (E.shim_ph < 0.0f) E.shim_ph += 1.0f;
+            else if (E.shim_ph >= 1.0f) E.shim_ph -= 1.0f;
+            E.shim_lp += (sh - E.shim_lp) * 0.5f;              /* ~4.6 kHz lowpass */
+            E.shim_dc += (E.shim_lp - E.shim_dc) * 0.01f;      /* ~77 Hz highpass */
+            E.shim_s += (shim_t - E.shim_s) * 0.001f;
+            shim_fb[i] = dsp_tanh((E.shim_lp - E.shim_dc) * E.shim_s * SHIM_FB);
+        }
+    }
     /* FDN reverb pass (8 lines, Hadamard feedback, per-line damping) + output */
     for (int i = 0; i < n; i++) {
         float l = outl[i], r = outr[i];
@@ -569,22 +597,8 @@ static void render_block(float *outl, float *outr, int n)
             x[j] = E.rev_lp[j] * E.rev_g[j];
         }
         float wetl = x[0] + x[2] + x[4] + x[6], wetr = x[1] + x[3] + x[5] + x[7];
-        /* shimmer: pitch-shift the wet sum, band-limit it, feed it back in */
-        E.shim[E.shim_w & (SHIM_N - 1)] = wetl + wetr;
-        float p1 = E.shim_ph, p2 = p1 + 0.5f;
-        if (p2 >= 1.0f) p2 -= 1.0f;
-        float s1 = tap(E.shim, SHIM_N - 1, E.shim_w, SHIM_MIN + p1 * SHIM_W);
-        float s2 = tap(E.shim, SHIM_N - 1, E.shim_w, SHIM_MIN + p2 * SHIM_W);
-        float g1 = 0.5f - 0.5f * dsp_sin1(p1 + 0.25f);     /* Hann: sin^2(pi p1) */
-        float sh = s1 * g1 + s2 * (1.0f - g1);
-        E.shim_w++;
-        E.shim_ph += shim_step;
-        if (E.shim_ph < 0.0f) E.shim_ph += 1.0f;
-        else if (E.shim_ph >= 1.0f) E.shim_ph -= 1.0f;
-        E.shim_lp += (sh - E.shim_lp) * 0.5f;              /* ~4.6 kHz lowpass */
-        E.shim_dc += (E.shim_lp - E.shim_dc) * 0.01f;      /* ~77 Hz highpass */
-        E.shim_s += (shim_t - E.shim_s) * 0.001f;
-        float fb = dsp_tanh((E.shim_lp - E.shim_dc) * E.shim_s * SHIM_FB);
+        E.shim[(E.shim_w + i) & (SHIM_N - 1)] = wetl + wetr;
+        float fb = shim_fb[i];
         for (int s = 1; s < REV_LINES; s <<= 1)            /* fast Hadamard */
             for (int j = 0; j < REV_LINES; j += s << 1)
                 for (int q = j; q < j + s; q++) {
@@ -609,6 +623,7 @@ static void render_block(float *outl, float *outr, int n)
         E.prof.delay += t2 - t1;
         E.prof.reverb += t3 - t2;
     }
+    E.shim_w += (uint32_t)n;
     for (int j = 0; j < REV_LINES; j++) E.rev_lp[j] = dsp_flush(E.rev_lp[j]);
     E.shim_lp = dsp_flush(E.shim_lp);
     E.shim_dc = dsp_flush(E.shim_dc);

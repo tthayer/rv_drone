@@ -435,6 +435,17 @@ void main(uint64_t hartid, uint64_t fdt)
                 uart_puts("engine: all notes off\n");
                 continue;
             }
+            if (c == 'r') {                        /* cycle REV MODE (via the UI, CC 48) */
+                int m = ((int)engine_param(P_REV_MODE) + 1) % 5;
+                uint8_t cc[3] = { 0xB0, 20 + P_REV_MODE, (uint8_t)((m * 127 + 2) / 4) };
+                ui_midi(cc, 3, 0);
+                char v[16];
+                param_format(P_REV_MODE, engine_param(P_REV_MODE), v);
+                uart_puts("engine: REV MODE ");
+                uart_puts(v);
+                uart_putc('\n');
+                continue;
+            }
             if (c == 'P') {                        /* dump every parameter's current value */
                 char v[16];
                 for (int id = 0; id < P_COUNT; id++) {

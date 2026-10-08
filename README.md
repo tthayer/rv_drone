@@ -159,7 +159,7 @@ three OLEDs.
 | Mouse wheel over a display half | turn that encoder |
 | Click a display half | press that encoder's switch (enc 1 = next page; others reset the parameter, or load/save on the PRESET page) |
 | `z s x d c v g b h n j m ,` | play notes C..C (piano layout); ↑ / ↓ = octave |
-| `k` | toggle a 120 BPM test MIDI clock (for the CLOCK page) |
+| `k` | toggle a 120 BPM test MIDI clock (for the MODES page) |
 | space | all notes off |
 | Esc | quit |
 
@@ -290,6 +290,7 @@ and the console's real baud rate and UART clock source (`uart: ...`).
 | `v` | engine kernels RVV ↔ scalar (A/B timing; RVV only if the boot self-test passed; scalar caps OSCS at 7 to stay real-time) |
 | `x` | rerun the scalar-vs-RVV kernel self-test |
 | `P` | print every engine parameter's current value (six per line) |
+| `r` | cycle REV MODE: HALL → SHIM OCT → SHIM 5TH → SUB OCT → FREEZE (through the UI, as CC 48) |
 | `c` | measure the C906 clock (rdcycle vs the 25 MHz timer) and print the clock registers |
 | `i` | SD card and volume info |
 | `F` `F` (within 3 s) | format the SD card (erases it) |
