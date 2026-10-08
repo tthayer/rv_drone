@@ -16,7 +16,7 @@ CPU budget) is documented in `docs/ENGINE.md`.
 SD survive a power cycle).
 
 - **Nano:** renders the drone engine (16 voices × 3–16 detuned or stacked oscillators,
-  filter, chorus, delay, FDN reverb) at about 33 % CPU worst case, streams it
+  filter, chorus, delay, FDN reverb with shimmer and freeze modes) at about 48 % CPU worst case (16 voices × 16 oscillators), streams it
   to Pico A over SPI2 DMA, owns the UI on all three OLEDs, follows MIDI clock,
   and saves/loads presets on the SD card.
 - **Pico A:** plays the Nano's audio from an 8-block ring (primed to 3 blocks,

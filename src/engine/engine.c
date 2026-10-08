@@ -1,3 +1,5 @@
+#include <string.h>
+
 #include "engine.h"
 #include "dsp.h"
 #include "osc.h"
@@ -16,6 +18,20 @@
  * (137 us/block). Padding each reverb row by one 64 B line puts line j j sets
  * further on; the delay's R buffer is pushed 5 lines away from L. */
 #define REV_PAD     16                  /* floats = one 64 B cache line */
+/* Shimmer: a two-tap pitch shifter on the reverb's output, fed back into its
+ * input. Each tap's delay sweeps across SHIM_W samples (85 ms) and the taps are
+ * half a sweep apart, with Hann crossfades that sum to 1. Like any delay-line
+ * shifter it detunes a pure tone by a few Hz (the grain rate), which the reverb
+ * smears into the shimmer; more taps or longer sweeps cancel on some notes. */
+#define SHIM_N      8192
+#define SHIM_W      4096.0f
+#define SHIM_MIN    32.0f               /* shortest tap delay, samples */
+/* Feedback at SHIMMER 100 %. Host sweep (3-note chord, every mode, SIZE 0..1,
+ * DAMP 0 / 0.5): the loop sustains itself above 0.19 at worst (OCT, DAMP 0,
+ * SIZE 0.75); 0.15 keeps every tail decaying. */
+#define SHIM_FB     0.15f
+#define FREEZE_G    0.99998f            /* per pass: holds for minutes, can't grow */
+enum { REV_HALL, REV_SHIM_OCT, REV_SHIM_5TH, REV_SUB_OCT, REV_FREEZE };
 #define DLY_PAD     (16 * 5)
 
 typedef struct { float ic1, ic2; } svf_t;
@@ -61,6 +77,11 @@ static struct {
     float rev_lp[REV_LINES];
     uint32_t rev_lenI[REV_LINES];
     float rev_g[REV_LINES];
+    float shim[SHIM_N];
+    uint32_t shim_w;
+    float shim_ph, shim_lp, shim_dc;
+    float rev_in_s;                     /* smoothed reverb input gain (0 in FREEZE) */
+    float shim_s;                       /* smoothed shimmer feedback */
     /* MIDI clock */
     uint32_t clk_last_t;
     int clk_have_last;
@@ -256,7 +277,13 @@ int engine_voices_active(void)
 
 void engine_init(float sr)
 {
-    /* static storage is zeroed at load (bss); reset what matters */
+    /* Clear everything, effect buffers included, so a re-init (tests, emulator)
+     * starts silent; keep the timer hook and the kernel choice. */
+    uint64_t (*now)(void) = E.now;
+    int simd = E.simd;
+    memset(&E, 0, sizeof E);
+    E.now = now;
+    E.simd = simd;
     E.sr = sr;
     E.inv_sr = 1.0f / sr;
     E.rng = 0x12345678u;
@@ -269,6 +296,7 @@ void engine_init(float sr)
     E.mix_s = 1.0f;
     E.vol_s = E.p[P_VOLUME];
     E.dly_s = E.p[P_DLY_TIME] * 0.001f * sr;
+    E.rev_in_s = 0.3f;
     /* silent until a note arrives (MIDI, or the emulator's keyboard / --notes) */
 }
 
@@ -483,11 +511,18 @@ static void render_block(float *outl, float *outr, int n)
     float size = E.p[P_REV_SIZE];
     float t60 = 1.5f + 12.0f * size * size;
     float damp = 0.05f + 0.85f * E.p[P_DAMP];             /* lowpass amount in the loop */
+    int rmode = (int)E.p[P_REV_MODE];
+    int freeze = rmode == REV_FREEZE;
+    if (freeze) damp = 0.0f;                              /* hold the spectrum as it is */
     for (int j = 0; j < REV_LINES; j++) {
         float len = rev_base[j] * (0.5f + 1.3f * size);
         E.rev_lenI[j] = (uint32_t)len;
-        E.rev_g[j] = dsp_exp2(-9.9657843f * len / (t60 * E.sr));
+        E.rev_g[j] = freeze ? FREEZE_G : dsp_exp2(-9.9657843f * len / (t60 * E.sr));
     }
+    static const float shim_ratio[REV_FREEZE] = { 1.0f, 2.0f, 1.4983071f, 0.5f };
+    float shim_t = (rmode > REV_HALL && rmode < REV_FREEZE) ? E.p[P_SHIMMER] : 0.0f;
+    float shim_step = rmode > REV_HALL && rmode < REV_FREEZE ? (1.0f - shim_ratio[rmode]) / SHIM_W : 0.0f;
+    float rin_t = freeze ? 0.0f : 0.3f;
     E.cho_ph += 0.23f * (float)n * E.inv_sr;
     if (E.cho_ph >= 1.0f) E.cho_ph -= 1.0f;
     float vol_t = E.p[P_VOLUME] * E.p[P_VOLUME];
@@ -534,6 +569,22 @@ static void render_block(float *outl, float *outr, int n)
             x[j] = E.rev_lp[j] * E.rev_g[j];
         }
         float wetl = x[0] + x[2] + x[4] + x[6], wetr = x[1] + x[3] + x[5] + x[7];
+        /* shimmer: pitch-shift the wet sum, band-limit it, feed it back in */
+        E.shim[E.shim_w & (SHIM_N - 1)] = wetl + wetr;
+        float p1 = E.shim_ph, p2 = p1 + 0.5f;
+        if (p2 >= 1.0f) p2 -= 1.0f;
+        float s1 = tap(E.shim, SHIM_N - 1, E.shim_w, SHIM_MIN + p1 * SHIM_W);
+        float s2 = tap(E.shim, SHIM_N - 1, E.shim_w, SHIM_MIN + p2 * SHIM_W);
+        float g1 = 0.5f - 0.5f * dsp_sin1(p1 + 0.25f);     /* Hann: sin^2(pi p1) */
+        float sh = s1 * g1 + s2 * (1.0f - g1);
+        E.shim_w++;
+        E.shim_ph += shim_step;
+        if (E.shim_ph < 0.0f) E.shim_ph += 1.0f;
+        else if (E.shim_ph >= 1.0f) E.shim_ph -= 1.0f;
+        E.shim_lp += (sh - E.shim_lp) * 0.5f;              /* ~4.6 kHz lowpass */
+        E.shim_dc += (E.shim_lp - E.shim_dc) * 0.01f;      /* ~77 Hz highpass */
+        E.shim_s += (shim_t - E.shim_s) * 0.001f;
+        float fb = dsp_tanh((E.shim_lp - E.shim_dc) * E.shim_s * SHIM_FB);
         for (int s = 1; s < REV_LINES; s <<= 1)            /* fast Hadamard */
             for (int j = 0; j < REV_LINES; j += s << 1)
                 for (int q = j; q < j + s; q++) {
@@ -541,7 +592,8 @@ static void render_block(float *outl, float *outr, int n)
                     x[q] = a + b;
                     x[q + s] = a - b;
                 }
-        float inl = l * 0.3f, inr = r * 0.3f;
+        E.rev_in_s += (rin_t - E.rev_in_s) * 0.001f;
+        float inl = l * E.rev_in_s + fb, inr = r * E.rev_in_s + fb;
         for (int j = 0; j < REV_LINES; j++)
             E.rev[j][E.rev_w & (REV_N - 1)] = dsp_flush(x[j] * 0.35355339f + ((j & 1) ? inr : inl) * ((j & 2) ? -1.0f : 1.0f));
         E.rev_w++;
@@ -558,6 +610,8 @@ static void render_block(float *outl, float *outr, int n)
         E.prof.reverb += t3 - t2;
     }
     for (int j = 0; j < REV_LINES; j++) E.rev_lp[j] = dsp_flush(E.rev_lp[j]);
+    E.shim_lp = dsp_flush(E.shim_lp);
+    E.shim_dc = dsp_flush(E.shim_dc);
     E.dly_lp_l = dsp_flush(E.dly_lp_l);
     E.dly_lp_r = dsp_flush(E.dly_lp_r);
 }

@@ -15,8 +15,8 @@ enum {
     P_ATTACK, P_RELEASE, P_LATCH, P_TRANSPOSE, P_DAMP, P_VOLUME,
     /* CLOCK (MIDI clock follower) */
     P_SYNC, P_LFO_DIV, P_DLY_DIV,
-    /* (same page) oscillator interval stacking */
-    P_STACK,
+    /* (same page, MODES) oscillator interval stacking, reverb mode */
+    P_STACK, P_REV_MODE, P_SHIMMER,
     P_COUNT
 };
 

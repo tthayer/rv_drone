@@ -520,7 +520,8 @@ with these specifics: oscillators morph sine → polyBLEP saw (SHAPE), detune sp
 across the bank plus ±10 cents of per-partial drift, a sine sub one octave
 down, a stereo TPT SVF per voice with a per-voice sine LFO on cutoff (up to
 ±3 octaves), a tanh-style saturator, then chorus (2 taps per side) → cross-fed
-damped delay (≤ 2 s) → 8-line Hadamard FDN reverb → volume + soft clip.
+damped delay (≤ 2 s) → 8-line Hadamard FDN reverb (REV MODE: hall, shimmer
++12/+7/−12 st, freeze) → volume + soft clip.
 Control rate is 32 frames.
 **MIDI clock follower** (external master, e.g. the MicroFreak): tempo = mean
 of the last 24 tick intervals (Pico B timestamps; gaps > 250 ms restart the
@@ -538,8 +539,10 @@ Verified in emu: 120 BPM + 1 BAR → filter-LFO period 2.02 s; 90 BPM +
 chord. The engine starts silent; notes come from MIDI (it latched a D2 + A2
 drone at boot until 2026-10-07).
 CCs: 1 mod depth, 7 volume, 71 reso, 72 release, 73 attack, 74 cutoff,
-91 reverb, 93 chorus, 20–47 = parameters 0–27 in page order (44 SYNC,
-45 LFO DIV, 46 DLY DIV, 47 STACK); 123 = all off.
+91 reverb, 93 chorus, 20–49 = parameters 0–29 in page order (44 SYNC,
+45 LFO DIV, 46 DLY DIV, 47 STACK, 48 REV MODE, 49 SHIMMER); 123 = all off.
+Pages: OSC, FILTER, SPACE, AMP, MODES (clock sync, divisions, STACK, reverb
+mode, shimmer), then PRESET.
 
 ### Initial sketch
 

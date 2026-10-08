@@ -29,7 +29,8 @@ describes what it does, how it is driven, and how it runs on the Nano.
  sum of voices x mix gain (1 up to 4 voices, then 2/sqrt(n))
   --> chorus (2 modulated taps per side, CHORUS)
   --> feedback delay (stereo, cross-fed, damped, DELAY/FEEDBACK/DLY MIX)
-  --> FDN reverb (8 lines, SIZE/DAMP/REVERB)
+  --> FDN reverb (8 lines, SIZE/DAMP/REVERB; REV MODE: hall, shimmer, freeze)
+        ^-- pitch shifter (+12 / +7 / -12 st) on the wet sum, fed back (SHIMMER)
   --> volume (VOLUME^2, smoothed) --> soft clip --> L/R float, about +-1
 ```
 
@@ -148,6 +149,32 @@ now folded into the voice-path gain.
     one-pole damping lowpass set by DAMP.
   - Input goes to the lines with alternating signs. Even lines feed L, odd
     lines feed R. REVERB sets the wet level.
+  - **REV MODE** picks how the reverb behaves:
+
+    | Mode | What it does |
+    |---|---|
+    | HALL | the plain FDN above |
+    | SHIM OCT | shimmer: the wet sum, shifted up 12 st, is fed back into the input |
+    | SHIM 5TH | the same, shifted up 7 st (×1.4983) |
+    | SUB OCT | the same, shifted down 12 st, a darker bloom |
+    | FREEZE | input fades out (about 20 ms), line gains go to 0.99998 and damping off, so the current tail holds for minutes; the dry sound still plays on top |
+
+  - **Shimmer pitch shifter:** two taps on a 8192-sample buffer of the wet
+    sum (L+R). Each tap's delay sweeps across 4096 samples (85 ms) at a rate
+    set by the pitch ratio, half a sweep apart, with Hann crossfades that sum
+    to 1. The shifted signal goes through a one-pole lowpass (about 4.6 kHz),
+    a one-pole highpass (about 77 Hz) and `tanh`, then into every line's
+    input. SHIMMER scales it, smoothed so mode changes don't click. Repeated
+    passes stack octaves (or fifths) upward, each quieter than the last.
+  - Like any delay-line shifter it detunes a pure sine by a few Hz (the
+    grain rate) and beats slightly; the reverb smears that into the shimmer.
+    More taps or longer sweeps were tried and cancel the shifted tone on
+    some notes.
+  - **Feedback limit:** a host sweep (3-note chord, every shimmer mode,
+    SIZE 0–1, DAMP 0 and 50 %, SHIMMER 100 %) found the loop sustains itself
+    above a gain of 0.19 at worst (SHIM OCT, DAMP 0, SIZE 75 %). `SHIM_FB`
+    is 0.15 at SHIMMER 100 %, so every tail still decays. The shifted band
+    lands 6–16 dB below the played note.
 - **Output:** volume is VOLUME², smoothed per sample, times `OUT_GAIN` (0.4),
   then `tanh_approx` soft-clips into ±1.
   - The gain is sized from measurement: the worst case (16 voices × 7 osc,
@@ -222,16 +249,18 @@ exactly one step per encoder click, and ENUMs wrap around.
 | AMP | TRANSPOS | −24…+24 st | 0 | int | 41 |
 | AMP | DAMP | 0–100 % | 50 % | lin | 42 |
 | AMP | VOLUME | 0–100 % (squared) | 85 % | lin | 43, **7** |
-| CLOCK | SYNC | OFF / MIDI | MIDI | enum | 44 |
-| CLOCK | LFO DIV | FREE, 1/4 … 8 BAR | FREE | enum | 45 |
-| CLOCK | DLY DIV | FREE, 1/16 … 1/2 | FREE | enum | 46 |
-| CLOCK/STACK | STACK | UNISON, OCTAVES, FIFTHS, ORGAN | UNISON | enum | 47 |
+| MODES | SYNC | OFF / MIDI | MIDI | enum | 44 |
+| MODES | LFO DIV | FREE, 1/4 … 8 BAR | FREE | enum | 45 |
+| MODES | DLY DIV | FREE, 1/16 … 1/2 | FREE | enum | 46 |
+| MODES | STACK | UNISON, OCTAVES, FIFTHS, ORGAN | UNISON | enum | 47 |
+| MODES | REV MODE | HALL, SHIM OCT, SHIM 5TH, SUB OCT, FREEZE | HALL | enum | 48 |
+| MODES | SHIMMER | 0–100 % (shimmer modes only) | 50 % | lin | 49 |
 
 CC values 0–127 map to a position of 0–1. CC 123 is All Notes Off.
 
 **UI:** the six encoders show the six parameters of the current page; each
 display shows two. Pushing encoder 1 steps through OSC → FILTER → SPACE → AMP
-→ CLOCK/STACK → PRESET. Pushing any other encoder resets its parameter to the
+→ MODES → PRESET. Pushing any other encoder resets its parameter to the
 default. The PRESET page is described in the README ("SD card and presets"):
 encoder 1 picks the slot, encoder 2 loads and encoder 3 saves. The right
 display previews the selected slot's stored settings: cutoff/reso, shape/detune,
@@ -288,6 +317,7 @@ are converted on load to the same oscillator count.
   |---|---|
   | delay | 2 × 131072 floats = 1 MiB |
   | reverb | 8 × 8192 floats = 256 KiB |
+  | shimmer | 8192 floats = 32 KiB |
   | chorus | 2 × 2048 floats = 16 KiB |
 
 - **Cores and caches** (SG2002 TRM, Diagram 2.1 "System Framework" and §2.3.1):
@@ -477,7 +507,10 @@ are converted on load to the same oscillator count.
   - `dsp_exp2` accuracy;
   - envelope release timing;
   - that stolen voices fade out before switching notes;
-  - STACK partials, by Goertzel energy at 110/220/440/880 Hz.
+  - STACK partials, by Goertzel energy at 110/220/440/880 Hz;
+  - each shimmer mode's shifted band (±30 Hz) is >10× HALL's, and at the
+    worst-case loop gain every shimmer tail decays (rms at 29 s < 1 % of 2 s);
+  - FREEZE holds the tail (> 70 % at 20 s) where HALL dies away.
 - **Measure on hardware:** console `w` sets up the worst-case load. The
   console's `engine:` and `prof` lines show the render time, overall and per
   stage. `v` switches between the scalar and RVV kernels; `x` reruns the
