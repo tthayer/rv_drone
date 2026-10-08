@@ -486,9 +486,10 @@ are converted on load to the same oscillator count.
     The voice path is 2.7× faster vectorised and the oscillators 4.9×.
 - **Shimmer cost** (2026-10-07, Nano, console `r`): the reverb stage takes
   67 µs per block in HALL and FREEZE and 79–80 µs in the three shimmer modes,
-  so shimmer adds about 13 µs (1 % CPU), only while it is selected. Added to
-  the 16 × 16 worst case (648 µs) that is about 661 µs, 49.6 % (estimated;
-  not measured with `w`). The shifter runs as a per-block pre-pass ahead of
+  so shimmer adds about 13 µs (1 % CPU), only while it is selected.
+  Measured with `w` in SHIM 5TH (16 voices × 16 osc, STACK FIFTHS): **667 µs
+  average, 697 µs worst block, 50 %** of the 1333 µs budget, with no Pico A
+  underruns. The shifter runs as a per-block pre-pass ahead of
   the reverb loop; offsetting its buffer by 9 cache lines made no difference,
   so the cost is arithmetic, not cache aliasing.
 

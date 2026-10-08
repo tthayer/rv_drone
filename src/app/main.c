@@ -465,7 +465,7 @@ void main(uint64_t hartid, uint64_t fdt)
                 cpuclk_dump();
                 continue;
             }
-            if (c == 'w') {                        /* worst-case load: 16 voices x 7 osc */
+            if (c == 'w') {                        /* worst-case load: 16 voices x max OSCS */
                 uint8_t cc[3] = { 0xB0, 20 + P_OSCS, 127 };
                 ui_midi(cc, 3, 0);
                 static const uint8_t chord[ENGINE_VOICES] = {
@@ -478,7 +478,7 @@ void main(uint64_t hartid, uint64_t fdt)
                     uint8_t off[3] = { 0x80, chord[i], 0 };
                     ui_midi(off, 3, 0);
                 }
-                uart_puts("engine: worst case (OSCS 7, 16 voices latched)\n");
+                uart_puts("engine: worst case (OSCS max, 16 voices latched)\n");
                 continue;
             }
 #endif
