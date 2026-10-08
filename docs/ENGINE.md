@@ -26,7 +26,7 @@ describes what it does, how it is driven, and how it runs on the Nano.
                                                     --> tanh drive (DRIVE)
                                                     --> envelope (ATTACK/RELEASE)
  ---------------------------------------------------------------------------
- sum of voices x 0.45
+ sum of voices x mix gain (1 up to 4 voices, then 2/sqrt(n))
   --> chorus (2 modulated taps per side, CHORUS)
   --> feedback delay (stereo, cross-fed, damped, DELAY/FEEDBACK/DLY MIX)
   --> FDN reverb (8 lines, SIZE/DAMP/REVERB)
@@ -41,7 +41,8 @@ into control blocks internally.
 
 ## Voices
 
-- **Four voices.** Each voice holds one MIDI note (plus TRANSPOSE). The engine
+- **Sixteen voices** (`ENGINE_VOICES`, 4 until 2026-10-07). Each voice holds
+  one MIDI note (plus TRANSPOSE). The engine
   starts **silent**: `engine_init()` plays nothing until a note arrives, from
   MIDI or the emulator's keyboard. `emu --wav` defaults to `--notes 38,45`
   (D2 + A2), so offline renders still have a drone. Until 2026-10-07 the boot
@@ -102,7 +103,10 @@ into control blocks internally.
 
 ## Effects (shared)
 
-The summed voices are scaled by 0.45 into the effects chain.
+The summed voices are scaled by a smoothed mix gain into the effects chain:
+1 for up to 4 sounding voices (as before), then 2/√n (0.5 at 16), so a full
+chord doesn't push the output into the clipper. It used to be a fixed ×0.45,
+now folded into the voice-path gain.
 
 - **Chorus:**
   - Two linearly interpolated taps per channel, at 12 ms ± 4 ms.
@@ -124,8 +128,15 @@ The summed voices are scaled by 0.45 into the effects chain.
     one-pole damping lowpass set by DAMP.
   - Input goes to the lines with alternating signs. Even lines feed L, odd
     lines feed R. REVERB sets the wet level.
-- **Output:** volume is VOLUME², smoothed per sample, then `tanh_approx(x × 1.5)`
-  soft-clips the output into ±1.
+- **Output:** volume is VOLUME², smoothed per sample, times `OUT_GAIN` (0.4),
+  then `tanh_approx` soft-clips into ±1.
+  - The gain is sized from measurement: the worst case (16 voices × 7 osc,
+    drive 60 %, reso 90 %, VOLUME 100 %) peaks at about 2.7× full scale before
+    this stage, so 0.4 lands it at −4 dBFS and the clipper is only a safety
+    net. Default settings sit around −9 dBFS.
+  - It was ×1.5 until 2026-10-07, which clipped hard even at 4 voices.
+    Presets saved before then play about 11 dB quieter; the default VOLUME
+    moved from 70 % to 85 % to compensate.
 
 ## MIDI clock follower
 
@@ -190,7 +201,7 @@ exactly one step per encoder click, and ENUMs wrap around.
 | AMP | LATCH | OFF / ON | ON | enum | 40 |
 | AMP | TRANSPOS | −24…+24 st | 0 | int | 41 |
 | AMP | DAMP | 0–100 % | 50 % | lin | 42 |
-| AMP | VOLUME | 0–100 % (squared) | 70 % | lin | 43, **7** |
+| AMP | VOLUME | 0–100 % (squared) | 85 % | lin | 43, **7** |
 | CLOCK | SYNC | OFF / MIDI | MIDI | enum | 44 |
 | CLOCK | LFO DIV | FREE, 1/4 … 8 BAR | FREE | enum | 45 |
 | CLOCK | DLY DIV | FREE, 1/16 … 1/2 | FREE | enum | 46 |
@@ -235,9 +246,11 @@ doesn't break older files.
 
   | Load | Time | CPU |
   |---|---|---|
-  | 1 voice × 5 osc | ~240 µs | 18 % |
-  | 2 voices × 5 osc (a D2 + A2 drone) | ~290 µs | 21 % |
-  | 4 voices × 7 osc (worst case, console `w`) | ~444 µs | 33 % |
+  | silent (effects only) | ~93 µs | 7 % |
+  | 2 voices × 5 osc (a D2 + A2 drone), M7 build | ~290 µs | 21 % |
+  | 4 voices × 7 osc, M7 build | ~444 µs | 33 % |
+  | **16 voices × 7 osc (worst case, console `w`), RVV** | **~390 µs** | **29 %** |
+  | 16 voices × 7 osc, scalar | ~976 µs | 73 % |
 
   The effects cost about 140 µs per block whatever the voice count. That figure
   is inferred from the measurements above, not measured on its own. The
@@ -397,9 +410,24 @@ doesn't break older files.
   worst case.
 - **Status:** **verified on hardware** (2026-10-07). The probe finds the vector
   unit off at boot and enables it via `sstatus.VS[24:23]` (VLEN 128). The
-  self-test passes, with a largest difference of 1.8e-7. The next candidate is the voice path: 8 filter lanes
-  (4 voices × 2 channels) per sample in one vector op. Whether to do it
-  depends on the C906 profile.
+  boot self-test covers the oscillator and voice-lane kernels, with a largest
+  difference of 1.8e-7.
+- **Vector voice path** (`src/engine/voice.c`):
+  - Each active voice contributes two lanes (L, R), up to 32.
+  - Per sample, every lane's TPT SVF, saturator and envelope advance in one
+    vector op. Lanes are processed in chunks of 8 (e32/m2) with state and
+    coefficients held in registers for the whole block.
+  - The sub-oscillator now runs as a one-oscillator sine bank through the osc
+    kernel.
+  - Output matches the previous engine to −107 dB (host render diff).
+  - **16 voices × 7 osc** on the C906, in µs per block:
+
+    | Kernels | osc | voice | chorus | delay | reverb | total | CPU |
+    |---|---|---|---|---|---|---|---|
+    | RVV | 128 | 51 | 13 | 7 | 63 | 390 | 29 % |
+    | scalar | 625 | 139 | 14 | 7 | 63 | 976 | 73 % |
+
+    The voice path is 2.7× faster vectorised and the oscillators 4.9×.
 
 ## Working on the engine
 

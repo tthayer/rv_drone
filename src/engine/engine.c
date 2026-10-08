@@ -1,6 +1,7 @@
 #include "engine.h"
 #include "dsp.h"
 #include "osc.h"
+#include "voice.h"
 
 #define MAX_OSC     OSC_MAX
 #define CTRL        32                  /* control-rate block */
@@ -67,7 +68,23 @@ static struct {
     int simd;
     uint64_t (*now)(void);
     engine_profile_t prof;
+    float mix_s;                        /* smoothed voice-sum gain */
 } E;
+
+static voice_lanes_t VL;                /* lane buffers for the voice path */
+
+/* Output gain before the soft clipper. Measured worst case (16 voices x 7 osc,
+ * drive 60 %, reso 90 %) peaks at 2.7x full scale before this stage at
+ * VOLUME 100 %. 0.4 puts that at about -3 dBFS, so the clipper is only a safety
+ * net. It was 1.5 until 2026-10-07, which clipped hard even at 4 voices. */
+#define OUT_GAIN 0.4f
+
+/* Voice-sum gain: unity up to 4 voices (as before), then 2/sqrt(n), so 16 voices
+ * at once don't drive the output clipper. No libm: a table. */
+static const float mix_gain[ENGINE_VOICES + 1] = {
+    1, 1, 1, 1, 1, 0.8944272f, 0.8164966f, 0.7559289f, 0.7071068f,
+    0.6666667f, 0.6324555f, 0.6030227f, 0.5773503f, 0.5547002f, 0.5345225f,
+    0.5163978f, 0.5f };
 
 #define CLK_WRAP_BEATS 96               /* multiple of every division (<= 32 beats) */
 
@@ -209,6 +226,7 @@ void engine_init(float sr)
     for (int i = 0; i < ENGINE_VOICES; i++) { E.v[i].note = -1; E.v[i].env = 0; E.v[i].gate = 0; }
     E.held = 0;
     E.cut_s = E.p[P_CUTOFF];
+    E.mix_s = 1.0f;
     E.vol_s = E.p[P_VOLUME];
     E.dly_s = E.p[P_DLY_TIME] * 0.001f * sr;
     /* silent until a note arrives (MIDI, or the emulator's keyboard / --notes) */
@@ -279,19 +297,24 @@ static void render_block(float *outl, float *outr, int n)
     float dly_beats = synced ? param_dly_div_beats((int)E.p[P_DLY_DIV]) : 0.0f;
     int bp = E.p[P_FMODE] >= 0.5f;
 
-    for (int i = 0; i < n; i++) outl[i] = outr[i] = 0.0f;
-
+    /* ---- voices: oscillators per voice (vector over the block), then every
+     * voice's filter/drive/envelope in one lane kernel (vector over voices) ---- */
+    int map[ENGINE_VOICES], nact = 0;
+    uint64_t t_osc = 0;
     for (int vi = 0; vi < ENGINE_VOICES; vi++) {
         voice_t *v = &E.v[vi];
         if (v->note < 0 || (!v->gate && v->env < 1e-4f)) continue;
         voice_control(v, nosc);
-        /* filter coefficients for this block */
+        /* filter LFO: voices 0-3 keep the original spread; later voices are
+         * interleaved between them so 16 voices stay within ~1.5x in rate */
+        float spread = 0.13f * (float)(vi & 3) + 0.037f * (float)(vi >> 2);
+        float phoff = 0.25f * (float)(vi & 3) + 0.0625f * (float)(vi >> 2);
         if (lfo_beats > 0.0f) {                       /* synced: phase from the beat */
-            float ph = E.beat_pos / lfo_beats + 0.25f * (float)vi;
+            float ph = E.beat_pos / lfo_beats + phoff;
             v->lfo_ph = ph - (float)(int32_t)ph;
             if (v->lfo_ph < 0.0f) v->lfo_ph += 1.0f;
         } else {
-            v->lfo_ph += E.p[P_FMOD_RATE] * (1.0f + 0.13f * (float)vi) * (float)n * E.inv_sr;
+            v->lfo_ph += E.p[P_FMOD_RATE] * (1.0f + spread) * (float)n * E.inv_sr;
             if (v->lfo_ph >= 1.0f) v->lfo_ph -= 1.0f;
         }
         float fc = E.cut_s * dsp_exp2(E.p[P_FMOD_DEPTH] * 3.0f * dsp_sin1(v->lfo_ph));
@@ -300,44 +323,83 @@ static void render_block(float *outl, float *outr, int n)
         float g = dsp_sin1(w) / dsp_sin1(0.25f - w);
         float a1 = 1.0f / (1.0f + g * (g + k_damp)), a2 = g * a1, a3 = g * a2;
 
-        /* oscillator bank for the whole block, then the per-sample voice path */
+        /* oscillator bank + sub (a one-oscillator sine bank, centred) */
         float bl[CTRL], br[CTRL];
         for (int i = 0; i < n; i++) bl[i] = br[i] = 0.0f;
+        osc_bank_t sb = { .n = 0 };
+        if (sub > 0.0f) {
+            float dt = (float)v->sub_inc * (1.0f / 4294967296.0f);
+            float gsub = sub * 1.2f / norm;
+            sb = (osc_bank_t){ .ph = { v->sub_ph }, .inc = { v->sub_inc }, .dt = { dt },
+                               .idt = { 1.0f / dt }, .gl = { gsub }, .gr = { gsub }, .n = 1 };
+        }
         uint64_t t0 = E.now ? E.now() : 0;
 #ifdef ENGINE_RVV
-        if (E.simd) osc_bank_rvv(&v->bank, shape, n, bl, br);
+        if (E.simd) {
+            osc_bank_rvv(&v->bank, shape, n, bl, br);
+            if (sb.n) osc_bank_rvv(&sb, 0.0f, n, bl, br);
+        } else
+#endif
+        {
+            osc_bank_scalar(&v->bank, shape, n, bl, br);
+            if (sb.n) osc_bank_scalar(&sb, 0.0f, n, bl, br);
+        }
+        if (E.now) t_osc += E.now() - t0;
+        v->sub_ph = sb.n ? sb.ph[0] : v->sub_ph + (uint32_t)n * v->sub_inc;
+
+        /* two lanes for this voice */
+        int L = 2 * nact;
+        for (int c = 0; c < 2; c++) {
+            VL.ic1[L + c] = v->f[c].ic1;
+            VL.ic2[L + c] = v->f[c].ic2;
+            VL.env[L + c] = v->env;
+            VL.a1[L + c] = a1;
+            VL.a2[L + c] = a2;
+            VL.a3[L + c] = a3;
+            VL.env_tgt[L + c] = v->env_target;
+            VL.env_coef[L + c] = v->env_coef;
+        }
+        for (int i = 0; i < n; i++) {
+            VL.x[i][L] = bl[i] * norm;
+            VL.x[i][L + 1] = br[i] * norm;
+        }
+        map[nact++] = vi;
+    }
+    uint64_t tv = E.now ? E.now() : 0;
+    VL.lanes = 2 * nact;
+    VL.k = k_damp;
+    VL.bp = bp;
+    VL.drive = drive;
+    VL.drive_out = drive_out;
+    if (nact) {
+#ifdef ENGINE_RVV
+        if (E.simd) voice_lanes_rvv(&VL, n);
         else
 #endif
-        osc_bank_scalar(&v->bank, shape, n, bl, br);
-        uint64_t t1 = E.now ? E.now() : 0;
-        for (int i = 0; i < n; i++) {
-            float sb = sub * dsp_sin1((float)v->sub_ph * (1.0f / 4294967296.0f)) * 1.2f;
-            v->sub_ph += v->sub_inc;
-            float l = bl[i] * norm + sb;
-            float r = br[i] * norm + sb;
-            /* TPT SVF per channel */
-            float in[2] = { l, r }, out[2];
-            for (int c = 0; c < 2; c++) {
-                svf_t *f = &v->f[c];
-                float v3 = in[c] - f->ic2;
-                float v1 = a1 * f->ic1 + a2 * v3;
-                float v2 = f->ic2 + a2 * f->ic1 + a3 * v3;
-                f->ic1 = 2.0f * v1 - f->ic1;
-                f->ic2 = 2.0f * v2 - f->ic2;
-                out[c] = bp ? v1 * k_damp : v2;
-            }
-            v->env += (v->env_target - v->env) * v->env_coef;
-            float gn = v->env * drive_out;
-            outl[i] += dsp_tanh(out[0] * drive) * gn;
-            outr[i] += dsp_tanh(out[1] * drive) * gn;
+        voice_lanes_scalar(&VL, n);
+    }
+    E.mix_s += (mix_gain[nact] - E.mix_s) * 0.05f;
+    for (int i = 0; i < n; i++) {
+        float l = 0.0f, r = 0.0f;
+        for (int k = 0; k < nact; k++) {
+            l += VL.y[i][2 * k];
+            r += VL.y[i][2 * k + 1];
         }
-        if (E.now) {
-            E.prof.osc += t1 - t0;
-            E.prof.voice += E.now() - t1;
+        outl[i] = l * E.mix_s;
+        outr[i] = r * E.mix_s;
+    }
+    for (int k = 0; k < nact; k++) {
+        voice_t *v = &E.v[map[k]];
+        for (int c = 0; c < 2; c++) {
+            v->f[c].ic1 = dsp_flush(VL.ic1[2 * k + c]);
+            v->f[c].ic2 = dsp_flush(VL.ic2[2 * k + c]);
         }
+        v->env = VL.env[2 * k];
         if (!v->gate && v->env < 1e-4f) { v->env = 0; v->note = -1; }
-        v->f[0].ic1 = dsp_flush(v->f[0].ic1); v->f[0].ic2 = dsp_flush(v->f[0].ic2);
-        v->f[1].ic1 = dsp_flush(v->f[1].ic1); v->f[1].ic2 = dsp_flush(v->f[1].ic2);
+    }
+    if (E.now) {
+        E.prof.osc += t_osc;
+        E.prof.voice += E.now() - tv;
     }
 
     /* ---- chorus: two modulated taps per side, quadrature LFOs ---- */
@@ -414,8 +476,8 @@ static void render_block(float *outl, float *outr, int n)
         l += rmix * wetl * 0.35f;
         r += rmix * wetr * 0.35f;
         E.vol_s += (vol_t - E.vol_s) * 0.001f;
-        outl[i] = dsp_tanh(l * E.vol_s * 1.5f);
-        outr[i] = dsp_tanh(r * E.vol_s * 1.5f);
+        outl[i] = dsp_tanh(l * E.vol_s * OUT_GAIN);
+        outr[i] = dsp_tanh(r * E.vol_s * OUT_GAIN);
     }
     if (E.now) {
         uint64_t t3 = E.now();

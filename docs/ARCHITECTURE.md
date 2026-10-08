@@ -533,7 +533,7 @@ Behaviour:
 | M6 ✅ | Nano UART2 + rvpanel end to end | 6 encoders, 6 switches and MIDI reach the Nano; the Nano draws all 3 OLEDs; 0 link errors in steady state (2026-10-06) |
 | M7 ✅ | Drone engine + `emu/` host build | Engine plays on the host, then on hardware via the panel and MIDI |
 | M8 | SDHCI + FatFs presets | Save and load across power cycles |
-| M9 | Perf (RVV), enclosure, single 5 V supply | CPU headroom ≥ 50 % at 4 voices |
+| M9 | Perf (RVV), enclosure, single 5 V supply | CPU headroom ≥ 50 % at full polyphony (16 voices: 29 % used with RVV, 2026-10-07) |
 
 ### Status (2026-10-06)
 

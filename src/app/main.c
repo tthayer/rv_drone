@@ -11,6 +11,7 @@
 #include "panel_ui.h"
 #include "engine.h"
 #include "osc.h"
+#include "voice.h"
 #include "vec.h"
 #include "cpuclk.h"
 #include "ui.h"
@@ -136,7 +137,41 @@ static int simd_selftest(void)
         for (int k = 0; k < OSC_MAX; k++)
             if (a.ph[k] != b.ph[k]) maxd = 1e9f;            /* phase bookkeeping must match */
     }
-    uart_puts("simd: self-test max |scalar - rvv| = ");
+    /* voice-lane kernel: 32 lanes (16 voices x 2), random state, two blocks */
+    {
+        static voice_lanes_t va, vb;
+        uint32_t q = 0x2545f491u;
+#define RNDF() (q ^= q << 13, q ^= q >> 17, q ^= q << 5, (float)(int32_t)q * (1.0f / 2147483648.0f))
+        va.lanes = VL_MAX;
+        va.k = 0.6f; va.bp = 0; va.drive = 1.75f; va.drive_out = 0.8f;
+        for (int l = 0; l < VL_MAX; l++) {
+            va.ic1[l] = 0.1f * RNDF(); va.ic2[l] = 0.1f * RNDF(); va.env[l] = 0.5f + 0.4f * RNDF();
+            float g = 0.05f + 0.04f * RNDF();
+            va.a1[l] = 1.0f / (1.0f + g * (g + va.k)); va.a2[l] = g * va.a1[l]; va.a3[l] = g * va.a2[l];
+            va.env_tgt[l] = l & 1 ? 1.0f : 0.0f; va.env_coef[l] = 0.001f;
+        }
+        for (int i = 0; i < 64; i++)
+            for (int l = 0; l < VL_MAX; l++) va.x[i][l] = 0.8f * RNDF();
+#undef RNDF
+        vb = va;
+        for (int blk = 0; blk < 2; blk++) {
+            if (blk) { va.bp = vb.bp = 1; }
+            voice_lanes_scalar(&va, 64);
+            voice_lanes_rvv(&vb, 64);
+            for (int i = 0; i < 64; i++)
+                for (int l = 0; l < VL_MAX; l++) {
+                    float d = va.y[i][l] - vb.y[i][l];
+                    if (d < 0) d = -d;
+                    if (d > maxd) maxd = d;
+                }
+            for (int l = 0; l < VL_MAX; l++) {
+                float d = va.ic1[l] - vb.ic1[l] + va.env[l] - vb.env[l];
+                if (d < 0) d = -d;
+                if (d > maxd) maxd = d;
+            }
+        }
+    }
+    uart_puts("simd: self-test (osc + voice lanes) max |scalar - rvv| = ");
     uart_put_dec((uint64_t)(maxd * 1e9f));
     uart_puts("e-9 -> ");
     int pass = maxd < 1e-4f;
@@ -391,19 +426,20 @@ void main(uint64_t hartid, uint64_t fdt)
                 cpuclk_dump();
                 continue;
             }
-            if (c == 'w') {                        /* M7: worst-case load, 4 voices x 7 osc */
+            if (c == 'w') {                        /* worst-case load: 16 voices x 7 osc */
                 uint8_t cc[3] = { 0xB0, 20 + P_OSCS, 127 };
                 ui_midi(cc, 3, 0);
-                static const uint8_t chord[4] = { 38, 45, 50, 57 };
-                for (int i = 0; i < 4; i++) {
+                static const uint8_t chord[ENGINE_VOICES] = {
+                    26, 33, 38, 45, 50, 52, 57, 59, 62, 64, 66, 69, 71, 74, 76, 81 };
+                for (int i = 0; i < ENGINE_VOICES; i++) {
                     uint8_t on[3] = { 0x90, chord[i], 100 };
                     ui_midi(on, 3, 0);
                 }
-                for (int i = 0; i < 4; i++) {
+                for (int i = 0; i < ENGINE_VOICES; i++) {
                     uint8_t off[3] = { 0x80, chord[i], 0 };
                     ui_midi(off, 3, 0);
                 }
-                uart_puts("engine: worst case (OSCS 7, 4 voices latched)\n");
+                uart_puts("engine: worst case (OSCS 7, 16 voices latched)\n");
                 continue;
             }
 #endif

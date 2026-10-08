@@ -1,4 +1,4 @@
-/* Drone engine: 4 voices of 3-7 detuned oscillators (sine -> saw morph, drift
+/* Drone engine: 16 voices of 3-7 detuned oscillators (sine -> saw morph, drift
  * LFOs, sub), a stereo SVF + saturator per voice, then chorus, feedback delay
  * and an 8-line FDN reverb. Float, no libm, no hardware: runs on the Nano
  * (main-loop context only; the trap entry does not save FP registers) and on
@@ -8,7 +8,7 @@
 #include <stdint.h>
 #include "params.h"
 
-#define ENGINE_VOICES 4
+#define ENGINE_VOICES 16
 
 void  engine_init(float sample_rate);         /* defaults, all voices silent */
 void  engine_set_param(int id, float value);  /* value in the parameter's unit */
