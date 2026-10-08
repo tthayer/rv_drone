@@ -564,7 +564,7 @@ Behaviour:
 | M5 ✅ | rvlink end to end | Nano 330 Hz sine plays via Pico A's ring: 10 min soak, 457k frames, 0 CRC errors, 0 underruns, 0 late refills (2026-10-06) |
 | M6 ✅ | Nano UART2 + rvpanel end to end | 6 encoders, 6 switches and MIDI reach the Nano; the Nano draws all 3 OLEDs; 0 link errors in steady state (2026-10-06) |
 | M7 ✅ | Drone engine + `emu/` host build | Engine plays on the host, then on hardware via the panel and MIDI |
-| M8 | SDHCI + FatFs presets | Save and load across power cycles |
+| M8 ✅ | SDHCI + FatFs presets | Saved slot 1, power-cycled the Nano, USB-booted: `LAST.TXT` restored slot 1 and all 28 params matched (2026-10-07) |
 | M9 | Perf (RVV), enclosure, single 5 V supply | CPU headroom ≥ 50 % at full polyphony: **met** (worst case 16 voices × 16 osc = 48 % with RVV, 2026-10-07); enclosure and the single 5 V supply are still to do |
 
 ### Status (2026-10-06)
@@ -618,7 +618,7 @@ Behaviour:
   - Encoders: 4 quadrature counts per click on all six (`UI_COUNTS_PER_DETENT`).
   - Audio noise/dropouts were a ground loop through the laptop charger
     (cleared on battery); not the PCM5102A module.
-- **M8 (in progress, 2026-10-06):** SD + FatFs presets.
+- **M8 (done, 2026-10-07):** SD + FatFs presets.
   - `src/hal/sd.c`: polled SDHCI on SD0 (0x04310000, DWC MSHC). Setup per the
     vendor Linux driver: CLK_EN_0 bits 18–20, pads func 0 + pulls (FMUX
     0x900/0xA00–0xA14), SD_PWRSW_CTRL (0x030001F4) = 3.3 V, MSHC_CTRL /
@@ -635,7 +635,8 @@ Behaviour:
     = slot, enc 2 push = load, enc 3 push = save. Console: `i` card info, `F` twice = format, `S`/`L` = slot 1.
   - Verified: 32 GB SDHC detected and formatted (FAT32, one MBR partition),
     save + load OK. Host: `make test-presets` round trip.
-  - Open: save → power cycle → restored at boot.
+  - Power cycle (2026-10-07): saved slot 1 (`S`), cut the Nano's power, USB-booted;
+    the boot loaded slot 1 via `LAST.TXT` and the `P` dump matched all 28 params.
 
 **Optional:**
 - **Faster USB boot:** slim OpenSBI (generic platform with only the 8250,

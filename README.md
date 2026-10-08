@@ -12,8 +12,8 @@ The design, pin maps, link protocols and milestones are in
 `docs/ARCHITECTURE.md`; the drone engine (sound, parameters, MIDI/clock,
 CPU budget) is documented in `docs/ENGINE.md`.
 
-**Current state (2026-10-07):** M0–M7 are done on hardware; M8 (presets on
-SD) is working and awaiting its power-cycle test.
+**Current state (2026-10-07):** M0–M8 are done on hardware (M8: presets on
+SD survive a power cycle).
 
 - **Nano:** renders the drone engine (16 voices × 3–16 detuned or stacked oscillators,
   filter, chorus, delay, FDN reverb) at about 33 % CPU worst case, streams it
@@ -24,7 +24,7 @@ SD) is working and awaiting its power-cycle test.
   Nano's display pages.
 - **Mac:** the same engine and UI run in an SDL2 emulator (`make emu`).
 
-Next: finish M8, then M9 (single 5 V supply, enclosure). Wiring diagrams are
+Next: M9 (single 5 V supply, enclosure). Wiring diagrams are
 in `docs/wiring/` (`system.svg`, `panel.svg`).
 
 ## Toolchain
