@@ -8,7 +8,9 @@
 #include <stdint.h>
 #include "params.h"
 
+#ifndef ENGINE_VOICES
 #define ENGINE_VOICES 16
+#endif
 
 void  engine_init(float sample_rate);         /* defaults, all voices silent */
 void  engine_set_param(int id, float value);  /* value in the parameter's unit */

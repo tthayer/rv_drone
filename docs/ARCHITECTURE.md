@@ -265,7 +265,7 @@ Its schematic is `SCH_UnitMIDI_B04`, dated 2024-07-08.
 | audio: 64 × (L,R) int32, 24-bit left-aligned (512 B) | padding |
 | CRC32 | CRC32 |
 
-- **Known issue (2026-10-07): link noise in the analog output.**
+- **Known issue (2026-10-07, largely resolved by grounding): link noise in the analog output.**
   - **Symptom:** with the engine silent (the Nano's `out: peak` reads 0/0), a
     high-pitched tone is audible on the **right** channel.
   - **Diagnosis:** it stops when the Nano holds the link idle, and persists
@@ -274,6 +274,8 @@ Its schematic is `SCH_UnitMIDI_B04`, dated 2024-07-08.
     ground wiring, not data. It was masked by the old always-on boot drone.
   - **Confirmed:** fitting the Pico B ↔ Nano ground (wire 3 of the panel cable
     in `docs/wiring/system.svg`) cut the tone a lot.
+  - **Resolved (mostly):** adding more ground wires between the boards almost
+    entirely eliminated it. The remaining options below are for any residue.
   - **Rules:** every board-to-board ground in the diagram must be fitted,
     short and solid, ideally starred to one point. The Nano ↔ Pico A link
     ground (L3 → pin 23) carries the SPI return current, so it matters most.

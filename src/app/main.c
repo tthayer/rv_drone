@@ -10,6 +10,7 @@
 #include "panel_link.h"
 #include "panel_ui.h"
 #include "engine.h"
+#include "params.h"
 #include "osc.h"
 #include "voice.h"
 #include "vec.h"
@@ -428,6 +429,18 @@ void main(uint64_t hartid, uint64_t fdt)
                 continue;
             }
             if (c == 'x') { simd_selftest(); continue; }
+            if (c == 'P') {                        /* dump every parameter's current value */
+                char v[16];
+                for (int id = 0; id < P_COUNT; id++) {
+                    param_format(id, engine_param(id), v);
+                    uart_puts(id % 6 == 0 ? "param: " : "  ");
+                    uart_puts(param_desc(id)->name);
+                    uart_putc('=');
+                    uart_puts(v);
+                    if (id % 6 == 5 || id == P_COUNT - 1) uart_putc('\n');
+                }
+                continue;
+            }
             if (c == 'c') {                        /* re-measure the CPU clock */
                 uart_puts("cpuclk: ");
                 uart_put_dec(cpuclk_measure_mhz());

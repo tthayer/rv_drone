@@ -273,6 +273,7 @@ and the console's real baud rate and UART clock source (`uart: ...`).
 | `w` | worst-case CPU load: OSCS 7, sixteen voices latched (loud: reboot or send CC 123 to stop) |
 | `v` | engine kernels RVV ↔ scalar (A/B timing; RVV only if the boot self-test passed) |
 | `x` | rerun the scalar-vs-RVV kernel self-test |
+| `P` | print every engine parameter's current value (six per line) |
 | `c` | measure the C906 clock (rdcycle vs the 25 MHz timer) and print the clock registers |
 | `i` | SD card and volume info |
 | `F` `F` (within 3 s) | format the SD card (erases it) |
