@@ -340,9 +340,14 @@ Its schematic is `SCH_UnitMIDI_B04`, dated 2024-07-08.
     0xFA, 2 continue 0xFB, 3 stop 0xFC), sent **from Pico B's UART1 IRQ** and
     stamped with its µs timer, so I2C flushes in its main loop add no jitter.
     All Pico B sends run with IRQs off per packet so packets never interleave.
-- **Ownership:** Pico B draws its local stand-in UI until the first PAGE
-  arrives, then shows only the Nano's pages. After 2.5 s without a packet
-  from the Nano it falls back to the local UI.
+- **Ownership:** until the first PAGE arrives, Pico B animates the boot
+  splash (`render_splash`: title, elapsed seconds, a three-sine drone wave
+  scrolling across the displays as one 384 px strip, about 30 fps). An
+  encoder turn or switch press swaps it for the local stand-in UI. Once
+  pages arrive it shows only the Nano's pages. After 2.5 s without a packet
+  from the Nano it returns to the splash (or the stand-in UI if an input was
+  used). Verified on hardware (2026-10-07): the splash runs through a Nano
+  `make usbboot` (about 20 s) and hands over cleanly, with 0 OLED write errors.
 - **Nano side:** `src/drivers/panel_link.c`. The UART2 RX IRQ decodes and
   queues events. The TX ring is drained by the UART2 **THR-empty interrupt** in
   programmable-threshold mode (`IER[7]`, `FCR[5:4]` = ¼ full), so the 64-byte FIFO

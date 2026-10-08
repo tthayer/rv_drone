@@ -74,3 +74,53 @@ void render_test_pattern(fb_t *out, unsigned oled, unsigned addr) {
     fb_fill_rect(out, x, 28, w, 10, false);
     fb_text(out, x + 3, 29, buf, 1, true);
 }
+
+// ---- boot splash -------------------------------------------------------------
+
+#define SPLASH_MID      42      // wave centre row
+#define SPLASH_SWELL_MS 1500    // amplitude ramps up over this long
+
+// Integer sine for a 32-bit phase (2^32 = one turn): a parabola per half turn,
+// -1024..1024. Close enough for 64 pixels, and no libm.
+static int isin(uint32_t ph) {
+    uint32_t u = (ph >> 22) & 511u;             // position within the half turn
+    int s = (int)((u * (512u - u)) >> 6);       // 0..1024
+    return (ph & 0x80000000u) ? -s : s;
+}
+
+// Wave row at canvas column x (0..383, all three displays side by side).
+static int splash_y(int x, uint32_t t_ms) {
+    uint32_t ux = (uint32_t)x;
+    int s1 = isin(ux * 22369621u + t_ms * 1789569u);        // 192 px, 2.4 s
+    int s2 = isin(ux * 57266230u - t_ms * 2526451u);        // 75 px, 1.7 s
+    int s3 = isin(ux * 138547333u + t_ms * 4772185u);       // 31 px, 0.9 s
+    int env = t_ms >= SPLASH_SWELL_MS ? 1024 : (int)(t_ms * 1024u / SPLASH_SWELL_MS);
+    env = env * (768 + isin(t_ms * 1073742u) / 4) / 1024;   // breathes every 4 s
+    int sum = 12 * s1 + 6 * s2 + 3 * s3;                    // up to 21 px
+    return SPLASH_MID + sum * env / (1024 * 1024);          // fits int32: 21504 * 1024
+}
+
+void render_splash(fb_t *out, unsigned oled, uint32_t t_ms) {
+    char buf[16];
+    fb_clear(out);
+    if (oled == 1) {
+        fb_text(out, (FB_W - fb_text_width("RV DRONE", 2)) / 2, 0, "RV DRONE", 2, true);
+    } else if (oled == 0) {
+        unsigned dots = (t_ms / 350u) % 4u;
+        snprintf(buf, sizeof buf, "booting%.*s", (int)dots, "...");
+        fb_text(out, 4, 4, buf, 1, true);
+    } else {
+        snprintf(buf, sizeof buf, "%lus", (unsigned long)(t_ms / 1000u));
+        fb_text(out, FB_W - 4 - fb_text_width(buf, 1), 4, buf, 1, true);
+    }
+    for (int x = 0; x < FB_W; x += 4) fb_pixel(out, x, SPLASH_MID, true);
+    int x0 = (int)oled * FB_W;
+    int prev = splash_y(x0 - 1, t_ms);
+    for (int x = 0; x < FB_W; x++) {
+        int y = splash_y(x0 + x, t_ms);
+        int lo = y < prev ? y : prev, hi = y < prev ? prev : y;
+        if (hi > lo) lo++;                      // join to the previous column
+        fb_fill_rect(out, x, lo, 1, hi - lo + 1, true);
+        prev = y;
+    }
+}

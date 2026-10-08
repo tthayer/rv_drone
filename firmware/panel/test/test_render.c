@@ -45,6 +45,28 @@ int main(int argc, char **argv) {
         snprintf(name, sizeof name, "oled%u", d);
         write_pbm(&shown, dir, name);
     }
+    // Splash: one frame early in the swell and one at full swing.
+    static const uint32_t splash_t[2] = { 700, 5200 };
+    for (unsigned f = 0; f < 2; f++)
+        for (unsigned d = 0; d < N_OLED; d++) {
+            render_splash(&scratch, d, splash_t[f]);
+            snprintf(name, sizeof name, "splash%u_%u", f, d);
+            write_pbm(&scratch, dir, name);
+        }
+    // The wave joins up across display edges: column 127 of one display and
+    // column 0 of the next are drawn from neighbouring canvas columns.
+    {
+        fb_t a, b;
+        render_splash(&a, 0, 5200);
+        render_splash(&b, 1, 5200);
+        int ya = -1, yb = -1;
+        for (int y = 20; y < FB_H; y++) {
+            if (y == 42) continue;                  // dotted baseline
+            if ((a.buf[y >> 3][FB_W - 1] >> (y & 7)) & 1) ya = y;
+            if ((b.buf[y >> 3][0] >> (y & 7)) & 1) yb = y;
+        }
+        CHECK(ya >= 0 && yb >= 0 && (ya - yb <= 6 && yb - ya <= 6));
+    }
     render_test_pattern(&scratch, 1, 0x3D);
     write_pbm(&scratch, dir, "testpattern");
 

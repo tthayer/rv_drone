@@ -5,7 +5,8 @@
 // Encoder, switch and MIDI events go to the Nano (and the USB CDC console).
 // The Nano owns the displays: its PAGE packets go straight into the
 // framebuffers. Until the first page arrives, or when the Nano has been
-// silent for NANO_TIMEOUT_MS, the local stand-in UI (render.c) is drawn.
+// silent for NANO_TIMEOUT_MS, the boot splash (render_splash) animates; the
+// first encoder turn or switch press swaps it for the local stand-in UI.
 //
 // Core 0: inputs, the Nano link, events, local rendering. Switches are sampled
 // by a 1 kHz repeating timer; MIDI bytes are collected by the UART1 RX
@@ -153,6 +154,8 @@ static spin_lock_t *fb_lock;                // oled_fb[] between core 0 and core
 static uint32_t i2c_hz = I2C_HZ_SAFE;
 static volatile int contrast_req = -1;      // core 0 -> core 1 (CONFIG packet)
 static bool nano_owned;                     // displays show the Nano's pages
+static bool local_ui;                       // an encoder/switch was used: stand-in UI, not the splash
+static uint32_t splash_t0;                  // splash start (ms since boot)
 static uint32_t nano_pages;
 
 static void mark_all_stale(void) {
@@ -287,13 +290,14 @@ static void refresh_displays(uint32_t now) {
     }
     for (unsigned d = 0; d < N_OLED; d++) {
         if (!oled[d].present) continue;
-        if (oled_stale[d] && !nano_owned) {
-            render_display(&scratch, d, &st, now);
-            uint32_t irq = spin_lock_blocking(fb_lock);
-            fb_update(&oled_fb[d], &scratch);   // only changed ranges become dirty
-            spin_unlock(fb_lock, irq);
-            oled_stale[d] = false;
-        }
+        if (nano_owned) continue;
+        if (!local_ui) render_splash(&scratch, d, now - splash_t0);   // animates every tick
+        else if (oled_stale[d]) render_display(&scratch, d, &st, now);
+        else continue;
+        uint32_t irq = spin_lock_blocking(fb_lock);
+        fb_update(&oled_fb[d], &scratch);       // only changed ranges become dirty
+        spin_unlock(fb_lock, irq);
+        oled_stale[d] = false;
     }
 }
 
@@ -376,6 +380,7 @@ static void poll_encoders(void) {
         st.enc_total[i] += delta;
         st.enc_delta[i] = delta;
         oled_stale[i / 2] = true;
+        local_ui = true;
         nano_link_send_enc(i, delta);
         printf("enc %u delta %ld total %ld\n", i + 1, (long)delta, (long)st.enc_total[i]);
     }
@@ -388,6 +393,7 @@ static void poll_switches(void) {
         sw_tail++;
         st.sw_down[e.id] = e.down;
         oled_stale[e.id / 2] = true;
+        local_ui = true;
         nano_link_send_sw(e.id, e.down);
         printf("sw %u %s\n", e.id + 1u, e.down ? "down" : "up");
     }
@@ -449,6 +455,7 @@ int main(void) {
             nano_link_get_stats(&ls);
             if (now - ls.last_rx_ms > NANO_TIMEOUT_MS) {
                 nano_owned = false;
+                splash_t0 = now;
                 mark_all_stale();
                 printf("nano: silent for %u ms, local UI\n", NANO_TIMEOUT_MS);
             }
@@ -456,6 +463,7 @@ int main(void) {
 
         if (pattern && now - t_boot >= TEST_PATTERN_MS) {
             pattern = false;
+            splash_t0 = now;
             mark_all_stale();
         }
         if (!pattern && now - t_refresh >= REFRESH_MS) {

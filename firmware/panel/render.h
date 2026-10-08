@@ -16,3 +16,8 @@ bool render_midi_lit(const panel_state_t *s, uint32_t now_ms);
 
 // Boot-time test pattern: border, diagonals, name and I2C address.
 void render_test_pattern(fb_t *out, unsigned oled, unsigned addr);
+
+// Boot splash while the Nano boots: title, status and a drone waveform that
+// scrolls across all three displays as one 384 px strip. t_ms = time since
+// the splash started (the wave swells in over the first 1.5 s).
+void render_splash(fb_t *out, unsigned oled, uint32_t t_ms);

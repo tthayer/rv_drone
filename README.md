@@ -127,12 +127,18 @@ The console (USB CDC) prints a banner (re-printed when a terminal connects),
 then `enc N delta D total T`, `sw N down|up` and `midi note_on ch C note N vel
 V` (also `note_off`, `cc`, `pitch_bend`, `program`; channels print as 1 to 16).
 Encoder totals are raw quadrature counts, usually 4 per detent; swap an
-encoder's A/B wires if it counts backwards. Each OLED shows its two encoders
-(total, position bar, last delta; a half inverts while its switch is held),
-with a MIDI activity box in the header. That local UI (`render.c`) is only a
-fallback now: once the Nano sends display pages (M6) Pico B shows those, and it
-returns to the local UI if the Nano is silent for 2.5 s. Pico B forwards
-encoder, switch, MIDI and MIDI-clock events to the Nano.
+encoder's A/B wires if it counts backwards.
+
+After a 1.5 s test pattern (name and I2C address per display), Pico B shows a
+**boot splash** until the Nano sends its first display page: "RV DRONE", a
+"booting" line, the seconds elapsed, and a drone waveform that swells in and
+scrolls across all three OLEDs (`render_splash` in `render.c`). The splash
+comes back whenever the Nano is silent for 2.5 s (for example while it
+reboots). Turning an encoder or pressing a switch swaps the splash for the
+local test UI: each OLED shows its two encoders (total, position bar, last
+delta; a half inverts while its switch is held), with a MIDI activity box in
+the header. Pico B forwards encoder, switch, MIDI and MIDI-clock events to
+the Nano.
 
 Host tests of the MIDI parser, switch debounce and the OLED renderer (which
 also writes the three layouts as PBM images to `build/panel-test/`):
