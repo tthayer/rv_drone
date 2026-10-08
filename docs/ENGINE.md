@@ -258,7 +258,7 @@ exactly one step per encoder click, and ENUMs wrap around.
 
 CC values 0–127 map to a position of 0–1. CC 123 is All Notes Off.
 
-**UI:** the six encoders show the six parameters of the current page; each
+**UI** (the player's guide is `docs/CONTROLS.md`): the six encoders show the six parameters of the current page; each
 display shows two. Pushing encoder 1 steps through OSC → FILTER → SPACE → AMP
 → MODES → PRESET. Pushing any other encoder resets its parameter to the
 default. The PRESET page is described in the README ("SD card and presets"):

@@ -11,6 +11,7 @@ A bare-metal drone synthesizer on three boards:
 The design, pin maps, link protocols and milestones are in
 `docs/ARCHITECTURE.md`; the drone engine (sound, parameters, MIDI/clock,
 CPU budget) is documented in `docs/ENGINE.md`.
+**How to play it** (panel, pages, presets, MIDI) is in `docs/CONTROLS.md`.
 
 **Current state (2026-10-07):** M0–M8 are done on hardware (M8: presets on
 SD survive a power cycle). The Nano now **boots standalone from SD**:
