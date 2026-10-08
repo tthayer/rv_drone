@@ -23,11 +23,15 @@ Six encoders with push switches, under three displays. Each display shows two
 encoders, left half and right half:
 
 ```
-   Display 1             Display 2             Display 3
-+---------+---------+ +---------+---------+ +---------+---------+
-| page name    x/6  | | MIDI  N57      []  | | V3  120>BPM    10% |  header
-|  enc 1  |  enc 2  | |  enc 3  |  enc 4  | |  enc 5  |  enc 6  |
-+---------+---------+ +---------+---------+ +---------+---------+
+      Display 1               Display 2               Display 3
++-------------------+   +-------------------+   +-------------------+
+| OSC          1/6  |   | MIDI N57      [#] |   | V3  120>BPM   10% |   header
++---------+---------+   +---------+---------+   +---------+---------+
+|  enc 1  |  enc 2  |   |  enc 3  |  enc 4  |   |  enc 5  |  enc 6  |
+|   name  |   name  |   |   name  |   name  |   |   name  |   name  |
+|  value  |  value  |   |  value  |  value  |   |  value  |  value  |
+| [###  ] | [##   ] |   | [###  ] | [##   ] |   | [###  ] | [##   ] |
++---------+---------+   +---------+---------+   +---------+---------+
 ```
 
 **Headers:**
