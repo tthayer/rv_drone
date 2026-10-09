@@ -111,10 +111,10 @@ required to be present: encoders and switches idle on pull-ups, and the boot
 banner lists which I2C addresses answered ("I2C0: 0x3C" etc.); only displays
 that ACK are driven.
 
-**OLED 1 must be at 0x3D.** On most SSD1306 modules, move the 0 Ω address
-resistor on the back from the 0x78 pad to the 0x7A pad. Until then it shares
-0x3C with OLED 0, so the firmware reports `I2C0: 0x3C` and `OLED1 ... not
-found`, and drives OLED 0 only.
+**OLED 1 is at 0x3D** (address resistor moved from the 0x78 pad to the 0x7A
+pad on the module; done and verified). Left at 0x3C it would share the address
+with OLED 0, so the firmware reports `I2C0: 0x3C` and `OLED1 ... not found`,
+and drives OLED 0 only.
 
 M5Stack Unit MIDI (Grove cable): white to GP21 (pin 27), red to VBUS (pin 40)
 (VSYS, pin 39, in the single-supply build), black to GND, mode switch on

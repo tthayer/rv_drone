@@ -43,13 +43,13 @@ work can never disturb audio timing.
 | Storage | 32 GB microSD, FAT32 | Nano | SD0 (on-board slot) |
 | Debug | FTDI adapter (5 V; divider on its TX) / USB CDC | Nano UART0 / Picos USB | 115200 |
 
-⚠ **OLED 1 must be moved to 0x3D.** On most SSD1306 modules that means
-moving the 0 Ω "IIC ADDRESS SELECT" resistor on the back from the 0x78
-position to the 0x7A position. That is SMD work. Bridging the 0x7A pads
-with a solder blob, after lifting the original resistor, is often enough.
-If it isn't practical, OLED 1 goes on a third bus run by PIO-based I2C
-using the spare GP9 plus one switch pin. That switch then moves to an
-ADC-ladder input.
+✅ **OLED 1 is at 0x3D** (address move done and verified). On most SSD1306
+modules that means moving the 0 Ω "IIC ADDRESS SELECT" resistor on the back
+from the 0x78 position to the 0x7A position. That is SMD work. Bridging the
+0x7A pads with a solder blob, after lifting the original resistor, is often
+enough. If a future build can't do it, OLED 1 goes on a third bus run by
+PIO-based I2C using the spare GP9 plus one switch pin. That switch then moves
+to an ADC-ladder input.
 
 ### Nano pins
 
