@@ -39,9 +39,6 @@ enum { REV_HALL, REV_SHIM_OCT, REV_SHIM_5TH, REV_SUB_OCT, REV_FREEZE, REV_CONV }
 
 typedef struct { float ic1, ic2; } svf_t;
 
-/* One stereo channel of the partitioned convolution reverb (issue #4): the
- * convolver plus the block in/out staging (CONV_B samples each). */
-typedef struct { conv_t c; float in[CONV_B], out[CONV_B]; int in_n, out_n, out_len; } creverb_t;
 #define CONV_IR_LEN 8192                /* built-in synthetic IR, samples (~170 ms) */
 
 typedef struct {
@@ -98,7 +95,7 @@ static struct {
     float shim_ph, shim_lp, shim_dc;
     float rev_in_s;                     /* smoothed reverb input gain (0 in FREEZE) */
     float shim_s;                       /* smoothed shimmer feedback */
-    creverb_t cr[2];                    /* convolution reverb (REV MODE = CONV) */
+    conv_t cr[2];                       /* convolution reverb (REV MODE = CONV) */
     /* MIDI clock */
     uint32_t clk_last_t;
     int clk_have_last;
@@ -356,7 +353,7 @@ static float conv_ir[CONV_IR_LEN];
  * IR's length or density. The target is set so CONV's wet matches the FDN's at
  * the same REVERB setting (a peak-normalised 8192-sample IR measured ~5 dB hot
  * vs HALL, which saturated the master tanh once REVERB was pushed up). */
-#define CONV_IR_GAIN 10.0f              /* target sqrt(sum ir^2) */
+#define CONV_IR_GAIN 3.0f               /* target sqrt(sum ir^2) */
 static void conv_ir_normalise(float *ir, int n)
 {
     float e = 0.0f;
@@ -372,23 +369,17 @@ static void conv_reverb_build_ir(void)
     if (built) return;
     built = 1;
     uint32_t rng = 0x9e3779b9u;
+    float lp1 = 0.0f, lp2 = 0.0f;
     for (int i = 0; i < CONV_IR_LEN; i++) {
-        float env = dsp_exp2(-6.0f * (float)i / (float)CONV_IR_LEN);   /* ~40 dB decay */
-        conv_ir[i] = dsp_noise(&rng) * env;
+        /* A room tail, not white noise: two cascaded one-poles (about 3 kHz)
+         * keep the IR smooth, so the wet sounds diffuse instead of like a
+         * bright hiss. (White noise is flat to Nyquist and reads as "crackly"
+         * on rich waveforms.) A real IR at /IR.RAW replaces this. */
+        lp1 += (dsp_noise(&rng) - lp1) * 0.35f;
+        lp2 += (lp1 - lp2) * 0.35f;
+        conv_ir[i] = lp2 * dsp_exp2(-6.0f * (float)i / (float)CONV_IR_LEN);   /* ~40 dB decay */
     }
     conv_ir_normalise(conv_ir, CONV_IR_LEN);
-}
-
-/* Push one input sample, pop one output sample (delayed by up to CONV_B). */
-static float conv_reverb(creverb_t *r, float x)
-{
-    float y = r->out_n < r->out_len ? r->out[r->out_n++] : 0.0f;
-    r->in[r->in_n++] = x;
-    if (r->in_n >= CONV_B) {
-        conv_process(&r->c, r->in, r->out);
-        r->in_n = 0; r->out_n = 0; r->out_len = CONV_B;
-    }
-    return y;
 }
 
 void engine_init(float sr)
@@ -405,7 +396,7 @@ void engine_init(float sr)
     E.rng = 0x12345678u;
     osc_wavetable_init();
     conv_reverb_build_ir();
-    for (int ci = 0; ci < 2; ci++) conv_init(&E.cr[ci].c, conv_ir, CONV_IR_LEN);
+    for (int ci = 0; ci < 2; ci++) conv_init(&E.cr[ci], conv_ir, CONV_IR_LEN);
     for (int i = 0; i < P_COUNT; i++) E.p[i] = param_desc(i)->def;
     for (int i = 0; i < ENGINE_VOICES; i++) {
         E.v[i].note = -1; E.v[i].env = 0; E.v[i].gate = 0; E.v[i].pending = -1;
@@ -427,10 +418,7 @@ void engine_ir_set(const float *ir, int len)
     if (len < 1) return;
     for (int i = 0; i < len; i++) buf[i] = ir[i];
     conv_ir_normalise(buf, len);            /* same level rule as the built-in IR */
-    for (int c = 0; c < 2; c++) {
-        conv_init(&E.cr[c].c, buf, len);
-        E.cr[c].in_n = E.cr[c].out_n = E.cr[c].out_len = 0;
-    }
+    for (int c = 0; c < 2; c++) conv_init(&E.cr[c], buf, len);
 }
 
 /* STACK modes: semitone interval and level weight per oscillator (cycling).
@@ -727,8 +715,8 @@ static void render_block(float *outl, float *outr, int n)
         float l = outl[i], r = outr[i];
         float wetl, wetr;
         if (conv_mode) {
-            wetl = conv_reverb(&E.cr[0], l * 0.3f);
-            wetr = conv_reverb(&E.cr[1], r * 0.3f);
+            wetl = conv_step(&E.cr[0], l * 0.3f);
+            wetr = conv_step(&E.cr[1], r * 0.3f);
         } else {
         float x[REV_LINES];
         for (int j = 0; j < REV_LINES; j++) {

@@ -341,18 +341,20 @@ int main(void)
     /* 12. Convolution: partitioned FFT convolution == direct FIR. */
     {
         static conv_t c;
-        static float ir[1000], x[CONV_B * 4], out[CONV_B];
+        static float ir[1000], x[CONV_B * 6], out[CONV_B];
         fft_init();
         for (int i = 0; i < 1000; i++) ir[i] = (float)((i * 13) % 7 - 3) * 0.01f;
-        for (int i = 0; i < CONV_B * 4; i++) x[i] = (float)((i * 29) % 17 - 8) * 0.05f;
+        for (int i = 0; i < CONV_B * 6; i++) x[i] = (float)((i * 29) % 17 - 8) * 0.05f;
         conv_init(&c, ir, 1000);
         float maxerr = 0;
-        for (int blk = 0; blk < 4; blk++) {
+        for (int blk = 0; blk < 6; blk++) {
             conv_process(&c, x + blk * CONV_B, out);
+            if (blk < 2) continue;              /* the output lags the input by 2 blocks */
+            int base = (blk - 2) * CONV_B;
             for (int j = 0; j < CONV_B; j++) {
                 float s = 0;
                 for (int k = 0; k < 1000; k++) {
-                    int idx = blk * CONV_B + j - k;
+                    int idx = base + j - k;
                     if (idx >= 0) s += ir[k] * x[idx];
                 }
                 float e = out[j] - s; if (e < 0) e = -e; if (e > maxerr) maxerr = e;
