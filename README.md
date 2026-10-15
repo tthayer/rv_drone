@@ -20,9 +20,11 @@ the instrument comes up on its own at power-on with the last preset. To go
 back to the USB dev loop, remove or rename `fip.bin` on the card.
 
 - **Nano:** renders the drone engine (16 voices × 3–16 detuned or stacked oscillators,
-  filter, chorus, delay, FDN reverb with shimmer and freeze modes) at about 48 % CPU worst case (16 voices × 16 oscillators; 50 % with shimmer), streams it
-  to Pico A over SPI2 DMA, owns the UI on all three OLEDs, follows MIDI clock,
-  and saves/loads presets on the SD card.
+  filter, chorus, delay of up to 120 s, FDN reverb with shimmer and freeze modes)
+  at about 48 % CPU worst case (16 voices × 16 oscillators; 50 % with shimmer),
+  streams it to Pico A over SPI2 DMA, owns the UI on all three OLEDs (including
+  a loop recorder on the LOOPER page), follows MIDI clock, and saves/loads
+  presets and loops on the SD card.
 - **Pico A:** plays the Nano's audio from an 8-block ring (primed to 3 blocks,
   frames checked by the DMA sniffer's hardware CRC) through the PCM5102A.
 - **Pico B:** forwards encoders, switches, MIDI and MIDI clock; draws the
@@ -292,6 +294,10 @@ can't hold its return path cleanly; the divisor is build-time:
 
     make EXTRA_CFLAGS=-DFW_UPLOAD_DIV=1 upload UPLOAD_PORT=...   # 1562500 baud
     make EXTRA_CFLAGS=-DFW_UPLOAD_DIV=4 upload UPLOAD_PORT=...   # 390625 baud
+
+The transfer has no flow control, so a slow card write can drop a byte and
+abort it (safely — the old `/fip.bin` is untouched until the staged copy
+verifies). `tools/upload-fip.py` retries automatically (`--retries`, default 3).
 
 Bootstrap: an older image without the command echoes `rx: 'u'` instead of
 starting the transfer. Boot that image once the old way (SD card or

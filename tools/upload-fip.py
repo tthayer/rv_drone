@@ -5,18 +5,20 @@ The SD card stays in the Nano: the firmware receives the image, stages it as
 /fip.new on the card, verifies its size and CRC-32, replaces /fip.bin and
 reboots into it.
 
-The transfer interrupts audio on purpose and runs at a high baud for speed.
+The transfer has no flow control, so a slow SD write can drop a byte and abort
+it (reported as "fwup: fail timeout"). That is safe - the old /fip.bin is left
+untouched until the staged copy verifies - so this script simply retries.
+
 Protocol (src/app/firmware_update.c):
-  - host sends 'u' at the console baud;
-  - Nano prints "fwup: ready baud <N>" (at the console baud), then switches
-    UART0 to N;
+  - host sends 'u' (the console firmware-update command) at the console baud;
+  - Nano prints "fwup: ready baud <N>", then switches UART0 to N;
   - host switches to N as well, then sends "RVFW", u32 size (LE),
     u32 crc32 (LE, zlib), then the image;
-  - Nano prints "fwup: done" (then reboots) or "fwup: fail <reason>".
+  - Nano prints "fwup: done" (then reboots) or "fwup: fail <reason>", always
+    at the console baud, where this host reads it back.
 
 The running firmware must include this command. Older images do not: there the
-'u' is echoed as `rx: 'u' ...` and this script times out. Boot such an image
-once over SD or USB and update it once the new way.
+'u' is echoed as `rx: 'u' ...` and this script reports it instead of retrying.
 """
 import argparse
 import re
@@ -94,6 +96,45 @@ def send_image(lk, image, chunk=512):
     sys.stderr.write("\n")
 
 
+def attempt(lk, image, args):
+    """One upload attempt. Returns (status, message): status is "ok", "retry"
+    (a transfer glitch - safe to try again) or "fatal" (a version/adapter
+    problem that retrying cannot fix)."""
+    lk.rx.clear()
+    lk.set_baud(args.baud)
+    lk.ser.reset_input_buffer()
+    lk.ser.write(b"u")
+    lk.ser.flush()
+
+    if not lk.wait_for(READY, timeout=10):
+        if FAIL in lk.rx:
+            return "retry", "Nano refused the update: " + lk.tail()
+        return "fatal", ("no 'fwup: ready' from the Nano. Does the running "
+                         "firmware have the 'u' command? (an echoed 'u' means an "
+                         "older image; boot it once over SD/USB)")
+
+    m = READY_BAUD.search(bytes(lk.rx))
+    fast = int(m.group(1)) if m else args.baud
+    if fast != args.baud:
+        try:
+            lk.set_baud(fast)
+        except (ValueError, OSError) as e:
+            return "fatal", (f"this adapter/OS cannot use {fast} baud ({e}); "
+                             f"rebuild with -DFW_UPLOAD_DIV=4 and retry")
+
+    log(f"sending image at {fast} baud...")
+    send_image(lk, image)
+
+    # The result is reported at the console baud (the upload baud's return path
+    # is not reliable on every adapter), so read it back there.
+    lk.set_baud(args.baud)
+    if lk.wait_for(DONE, timeout=args.timeout):
+        return "ok", None
+    if FAIL in lk.rx:
+        return "retry", "update failed: " + lk.tail()
+    return "retry", "timed out waiting for 'fwup: done': " + lk.tail()
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("fip", help="fip.bin to upload")
@@ -103,6 +144,8 @@ def main():
                     help="console baud before the switch (default 115200)")
     ap.add_argument("--timeout", type=float, default=30.0,
                     help="seconds to wait for the final result (default 30)")
+    ap.add_argument("--retries", type=int, default=3,
+                    help="attempts before giving up (default 3)")
     a = ap.parse_args()
 
     image = open(a.fip, "rb").read()
@@ -110,45 +153,23 @@ def main():
         sys.exit(f"{a.fip} is empty")
 
     lk = Link(a.port, a.baud)
-    lk.ser.reset_input_buffer()
-
     log(f"upload: {a.fip} ({len(image)} B, crc {zlib.crc32(image) & 0xFFFFFFFF:08x}) -> {a.port}")
-    lk.ser.write(b"u")
-    lk.ser.flush()
 
-    if not lk.wait_for(READY, timeout=10):
-        if FAIL in lk.rx:
-            sys.exit("Nano refused the update: " + lk.tail())
-        sys.exit("no 'fwup: ready' from the Nano. Does the running firmware have the "
-                 "'u' command? (an echoed 'u' means an older image; boot it once over "
-                 "SD/USB and update it the new way)")
-
-    m = READY_BAUD.search(bytes(lk.rx))
-    fast = int(m.group(1)) if m else a.baud
-    if fast != a.baud:
-        log(f"firmware switched to {fast} baud; following.")
-        try:
-            lk.set_baud(fast)
-        except (ValueError, OSError) as e:
-            sys.exit(f"this adapter/OS cannot use {fast} baud ({e}). Rebuild the "
-                     f"firmware with -DFW_UPLOAD_DIV=2 (781250 baud) and retry.")
-
-    log(f"sending image at {fast} baud...")
-    send_image(lk, image)
-
-    # The Nano reports the result at the console baud (the upload baud's return
-    # path is not reliable on every adapter), so read it back there.
-    lk.set_baud(a.baud)
-    if not lk.wait_for(DONE, timeout=a.timeout):
-        if FAIL in lk.rx:
-            sys.exit("update failed: " + lk.tail())
-        sys.exit("timed out waiting for 'fwup: done': " + lk.tail())
-
-    log("flash: /fip.bin replaced; board is rebooting.")
-    try:
-        lk.ser.close()
-    except Exception:
-        pass
+    for i in range(1, a.retries + 1):
+        status, msg = attempt(lk, image, a)
+        if status == "ok":
+            log("flash: /fip.bin replaced; board is rebooting.")
+            try:
+                lk.ser.close()
+            except Exception:
+                pass
+            return
+        if status == "fatal":
+            sys.exit(msg)
+        log(f"attempt {i}/{a.retries} failed: {msg}")
+        if i < a.retries:
+            time.sleep(0.5)                                # let the Nano settle
+    sys.exit(f"upload failed after {a.retries} attempts")
 
 
 if __name__ == "__main__":
