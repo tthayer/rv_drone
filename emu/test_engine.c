@@ -10,13 +10,15 @@
  *  8. Delay length: the echo lands at the set time, including 30 s.
  *  9. Loop recorder: record -> loop -> periodic -> overdub.
  * 10. Wavetable oscillator: band-limited (no harmonics above Nyquist).
- * 11. FFT: round-trip identity; an impulse transforms to a flat spectrum. */
+ * 11. FFT: round-trip identity; an impulse transforms to a flat spectrum.
+ * 12. Convolution: partitioned FFT convolution matches a direct FIR. */
 #include <math.h>
 #include <stdio.h>
 #include "dsp.h"
 #include "engine.h"
 #include "params.h"
 #include "fft.h"
+#include "conv.h"
 
 static int fails;
 #define CHECK(c, ...) do { if (!(c)) { printf("FAIL: "); printf(__VA_ARGS__); printf("\n"); fails++; } } while (0)
@@ -335,7 +337,30 @@ int main(void)
         CHECK(flat < 0.02f, "FFT impulse not flat (max dev %.4g)", flat);
     }
 
+    /* 12. Convolution: partitioned FFT convolution == direct FIR. */
+    {
+        static conv_t c;
+        static float ir[1000], x[CONV_B * 4], out[CONV_B];
+        fft_init();
+        for (int i = 0; i < 1000; i++) ir[i] = (float)((i * 13) % 7 - 3) * 0.01f;
+        for (int i = 0; i < CONV_B * 4; i++) x[i] = (float)((i * 29) % 17 - 8) * 0.05f;
+        conv_init(&c, ir, 1000);
+        float maxerr = 0;
+        for (int blk = 0; blk < 4; blk++) {
+            conv_process(&c, x + blk * CONV_B, out);
+            for (int j = 0; j < CONV_B; j++) {
+                float s = 0;
+                for (int k = 0; k < 1000; k++) {
+                    int idx = blk * CONV_B + j - k;
+                    if (idx >= 0) s += ir[k] * x[idx];
+                }
+                float e = out[j] - s; if (e < 0) e = -e; if (e > maxerr) maxerr = e;
+            }
+        }
+        CHECK(maxerr < 5e-3f, "partitioned convolution vs direct FIR: max err %.4g", maxerr);
+    }
+
     if (fails) printf("test_engine: %d FAILED\n", fails);
-    else printf("test_engine: all passed (exp2 %.1e, %d steals faded, STACK partials, shimmer, freeze, velocity, delay, loop, wavetable, fft ok)\n", worst, steals);
+    else printf("test_engine: all passed (exp2 %.1e, %d steals faded, STACK partials, shimmer, freeze, velocity, delay, loop, wavetable, fft, conv ok)\n", worst, steals);
     return fails != 0;
 }

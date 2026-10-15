@@ -37,7 +37,7 @@ LDFLAGS := -nostdlib -static -Wl,-T,src/boot/link.ld -Wl,-Map,$(NAME).map -Wl,--
 
 SRCS := src/boot/start.S src/boot/trap.S src/hal/uart.c src/hal/trap.c \
        src/hal/timer.c src/hal/plic.c src/hal/reset.c src/hal/cache.c src/hal/dma.c src/app/main.c \
-       src/engine/engine.c src/engine/osc.c src/engine/voice.c src/engine/params.c src/engine/fft.c src/ui/ui.c src/hal/vec.c src/hal/cpuclk.c
+       src/engine/engine.c src/engine/osc.c src/engine/voice.c src/engine/params.c src/engine/fft.c src/engine/conv.c src/ui/ui.c src/hal/vec.c src/hal/cpuclk.c
 ifeq ($(BOARD),nano)
 SRCS += src/hal/pinmux.c src/hal/gpio.c src/hal/spi.c src/hal/sd.c src/fs/diskio.c \
         src/app/preset_fs.c src/app/firmware_update.c
@@ -169,7 +169,7 @@ test-link:
 	build/link-test/test_link
 
 # Host emulator: engine + UI on macOS with SDL2 (window + audio, or --wav offline).
-EMU_SRCS := emu/main.c src/engine/engine.c src/engine/osc.c src/engine/voice.c src/engine/params.c src/engine/fft.c src/ui/ui.c common/fb.c common/font5x7.c
+EMU_SRCS := emu/main.c src/engine/engine.c src/engine/osc.c src/engine/voice.c src/engine/params.c src/engine/fft.c src/engine/conv.c src/ui/ui.c common/fb.c common/font5x7.c
 emu: build/emu/rv_drone_emu
 build/emu/rv_drone_emu: $(EMU_SRCS) $(wildcard src/engine/*.h src/ui/*.h common/*.h)
 	@mkdir -p build/emu
@@ -186,14 +186,14 @@ wiring:
 test-engine:
 	@mkdir -p build/emu
 	cc -std=gnu11 -O2 -Wall -Wextra -Isrc/engine emu/test_engine.c \
-	   src/engine/engine.c src/engine/osc.c src/engine/voice.c src/engine/params.c src/engine/fft.c -lm -o build/emu/test_engine
+	   src/engine/engine.c src/engine/osc.c src/engine/voice.c src/engine/params.c src/engine/fft.c src/engine/conv.c -lm -o build/emu/test_engine
 	build/emu/test_engine
 
 # Host test: preset save/load round trip through ui.c with an in-memory store.
 test-presets:
 	@mkdir -p build/emu
 	cc -std=gnu11 -O2 -Wall -Wextra -Isrc/engine -Isrc/ui -Icommon emu/test_presets.c \
-	   src/engine/engine.c src/engine/osc.c src/engine/voice.c src/engine/params.c src/engine/fft.c src/ui/ui.c common/fb.c common/font5x7.c -o build/emu/test_presets
+	   src/engine/engine.c src/engine/osc.c src/engine/voice.c src/engine/params.c src/engine/fft.c src/engine/conv.c src/ui/ui.c common/fb.c common/font5x7.c -o build/emu/test_presets
 	build/emu/test_presets
 
 # Offline render (20 s, default drone) + level/sanity stats.
