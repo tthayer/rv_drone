@@ -6,7 +6,9 @@
  *  5. Shimmer: each mode adds energy at its shifted pitch, and the feedback
  *     loop decays at its worst-case settings instead of sustaining itself.
  *  6. FREEZE holds the reverb; HALL lets it die away.
- *  7. Velocity scales the note level; velocity 0 is a note off. */
+ *  7. Velocity scales the note level; velocity 0 is a note off.
+ *  8. Delay length: the echo lands at the set time, including 30 s.
+ *  9. Loop recorder: record -> loop -> periodic -> overdub. */
 #include <math.h>
 #include <stdio.h>
 #include "dsp.h"
@@ -216,7 +218,69 @@ int main(void)
         CHECK(rms(tl, 0) < 1e-6, "velocity 0 sounded (rms %.3g)", rms(tl, 0));
     }
 
+    /* 8. Delay length: the echo lands at the set time, including a long (30 s)
+     *    setting that only fits because DLY_N is large. */
+    {
+        static const int dly_ms[3] = { 300, 1500, 30000 };
+        for (int j = 0; j < 3; j++) {
+            plain_setup(0, 0.5f, 0.5f);
+            engine_set_param(P_CHORUS, 0); engine_set_param(P_REV_MIX, 0);
+            engine_set_param(P_SYNC, 0); engine_set_param(P_DLY_DIV, 0);
+            engine_set_param(P_DLY_MIX, 1.0f); engine_set_param(P_DLY_FB, 0);
+            engine_set_param(P_ATTACK, 0.002f); engine_set_param(P_RELEASE, 0.01f);
+            engine_set_param(P_DLY_TIME, (float)dly_ms[j]);
+            engine_note_on(60, 127);
+            int off = (int)(0.01f * SR);
+            int n = off + (int)(dly_ms[j] * 0.001f * SR) + SR / 4;
+            for (int s = 0; s < n; s += 32) {
+                if (s >= off && s < off + 32) engine_note_off(60);
+                engine_render(tl + s, r, 32);
+            }
+            int from = (int)(0.05f * SR), pk = from;
+            float pm = 0;
+            for (int s = from; s < n; s++) {
+                float a = tl[s] < 0 ? -tl[s] : tl[s];
+                if (a > pm) { pm = a; pk = s; }
+            }
+            double want = dly_ms[j] * 0.001 * SR;
+            CHECK(pm > 5e-3f && fabs((double)pk - want) < 0.03 * SR,
+                  "delay %d ms: echo at %.0f ms (peak %.3g)", dly_ms[j], pk * 1000.0 / SR, pm);
+        }
+    }
+
+    /* 9. Loop recorder: record a burst, stop (it loops), play it back with no
+     *    voices, and overdub onto the same length. */
+    {
+        engine_init(SR);
+        engine_set_param(P_LATCH, 0);
+        engine_set_param(P_ATTACK, 0.002f); engine_set_param(P_RELEASE, 0.01f);
+        engine_set_param(P_OSCS, 3); engine_set_param(P_DETUNE, 0); engine_set_param(P_DRIFT, 0);
+        engine_set_param(P_SHAPE, 0); engine_set_param(P_SUB, 0); engine_set_param(P_SPREAD, 0);
+        engine_set_param(P_CUTOFF, 12000); engine_set_param(P_FMOD_DEPTH, 0); engine_set_param(P_DRIVE, 0);
+        engine_set_param(P_CHORUS, 0); engine_set_param(P_DLY_MIX, 0); engine_set_param(P_REV_MIX, 0);
+        engine_set_param(P_VOLUME, 1.0f);
+        const int rec = SR / 2;
+        engine_loop_action(LOOP_CLEAR);
+        engine_note_on(60, 127);
+        engine_loop_action(LOOP_REC);
+        for (int s = 0; s < rec; s += 32) {
+            if (s >= 32 && s < 64) engine_note_off(60);
+            engine_render(l, r, 32);
+        }
+        engine_loop_action(LOOP_REC);                 /* stop -> play */
+        CHECK(engine_loop_len() == (uint32_t)rec, "loop length %u, want %d", engine_loop_len(), rec);
+        CHECK(engine_loop_state() == LOOP_PLAYING, "loop state %d after rec", engine_loop_state());
+        double e1 = 0, e2 = 0;
+        for (int s = 0; s < rec; s += 32) { engine_render(l, r, 32); for (int i = 0; i < 32; i++) e1 += (double)l[i] * l[i]; }
+        for (int s = 0; s < rec; s += 32) { engine_render(l, r, 32); for (int i = 0; i < 32; i++) e2 += (double)l[i] * l[i]; }
+        CHECK(e1 > 1e-2, "loop playback silent (%.3g)", e1);
+        CHECK(fabs(e2 - e1) < 0.25 * e1, "loop not periodic (%.3g vs %.3g)", e2, e1);
+        engine_loop_action(LOOP_DUB);                 /* overdub keeps the length */
+        for (int s = 0; s < rec; s += 32) engine_render(l, r, 32);
+        CHECK(engine_loop_len() == (uint32_t)rec, "overdub changed the length to %u", engine_loop_len());
+    }
+
     if (fails) printf("test_engine: %d FAILED\n", fails);
-    else printf("test_engine: all passed (exp2 %.1e, %d steals faded, STACK partials, shimmer, freeze, velocity ok)\n", worst, steals);
+    else printf("test_engine: all passed (exp2 %.1e, %d steals faded, STACK partials, shimmer, freeze, velocity, delay, loop ok)\n", worst, steals);
     return fails != 0;
 }

@@ -422,6 +422,12 @@ gets `a1` = 0x80080000 pointing at that DTB (hartid in `a0`).
 fiptool LZMA-wraps the payload, and the FSBL accepts it. This was verified
 on hardware on 2026-10-01.
 
+**Memory window:** our image loads at `0x80200000`. The DTS memory node is
+`0x80000000..0x8FE00000` (the top 2 MiB is the C906L region), so the linker
+window (`src/boot/link.ld`) is 224 MiB. `.bss` is `NOLOAD`, so the large delay
+and loop buffers (~96 MiB, see `docs/ENGINE.md`) do not grow `fip.bin`;
+`start.S` zeroes them at boot.
+
 The boot image can also be replaced **in place while the Nano runs**: the
 console `u` command (`src/app/firmware_update.c`) receives a new `fip.bin` over
 UART0, stages it as `/fip.new`, verifies size and CRC-32 (and re-reads the

@@ -97,7 +97,7 @@ of a chord move apart.
 | Enc | Name | Range | What it does | CC |
 |---|---|---|---|---|
 | 1 | CHORUS | 0–100 % [40 %] | chorus amount | 32, 93 |
-| 2 | DELAY | 20 ms–2 s [850 ms] | delay time (when not synced) | 33 |
+| 2 | DELAY | 20 ms–120 s [850 ms] | delay time (when not synced) | 33 |
 | 3 | FEEDBACK | 0–95 % [55 %] | delay repeats; each repeat gets darker | 34 |
 | 4 | DLY MIX | 0–100 % [25 %] | delay level | 35 |
 | 5 | SIZE | 0–100 % [75 %] | reverb size and decay time (1.5–13.5 s) | 36 |
@@ -170,6 +170,23 @@ and size, attack and release. A message confirms each action: `LOADED 03`,
 
 Loading or saving a slot also makes it the one loaded at the next power-up.
 Presets are text files on the SD card, `/presets/P01.TXT` to `P16.TXT`.
+
+### 7. LOOPER
+
+| Control | Action |
+|---|---|
+| Turn encoder 1 | pick a loop slot, 01–08 |
+| Push encoder 2 | REC — start recording; push again to stop (it loops) |
+| Push encoder 3 | PLAY / STOP |
+| Push encoder 4 | DUB — layer the new input onto the playing loop |
+| Push encoder 5 | SAVE the loop to the slot |
+| Push encoder 6 | LOAD the slot |
+| Push encoder 1 | back to the OSC page |
+
+Records whatever the engine plays (effects included) into a long buffer — up to
+about 87 s, from the spare DDR. The header shows the state and length (`REC`,
+`PLAY`, `DUB`, `OFF`). Pushing REC again clears and re-records. Loops are raw
+float32 files `LOOP01.RAW`–`LOOP08.RAW` on the SD card.
 
 ## MIDI
 

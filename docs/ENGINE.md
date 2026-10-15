@@ -31,6 +31,7 @@ describes what it does, how it is driven, and how it runs on the Nano.
   --> feedback delay (stereo, cross-fed, damped, DELAY/FEEDBACK/DLY MIX)
   --> FDN reverb (8 lines, SIZE/DAMP/REVERB; REV MODE: hall, shimmer, freeze)
         ^-- pitch shifter (+12 / +7 / -12 st) on the wet sum, fed back (SHIMMER)
+  --> loop recorder (capture the post-effects signal, add the loop playback)
   --> volume (VOLUME^2, smoothed) --> soft clip --> L/R float, about +-1
 ```
 
@@ -138,7 +139,9 @@ now folded into the voice-path gain.
 - **Delay:**
   - Stereo with cross-fed feedback (ping-pong-like) and a one-pole lowpass in
     the loop, so repeats darken.
-  - Up to 2 s; DELAY sets the time in free mode.
+  - Up to 120 s; DELAY sets the time in free mode. The buffer is 2^23 samples
+    per channel (~175 s, 64 MiB stereo) out of the spare DDR; the delay streams
+    from it sequentially, so the CPU cost is unchanged.
   - The time glides (0.0005 per sample), so changing it bends the pitch like
     tape instead of clicking.
   - FEEDBACK goes up to 95 %; DLY MIX sets the wet level.
@@ -185,6 +188,27 @@ now folded into the voice-path gain.
   - It was ×1.5 until 2026-10-07, which clipped hard even at 4 voices.
     Presets saved before then play about 11 dB quieter; the default VOLUME
     moved from 70 % to 85 % to compensate.
+
+## Loop recorder
+
+The LOOPER page records the post-effects output into a large buffer, loops it,
+and layers overdubs — spare DDR, like the long delay. RAM is the only real
+cost; the buffer streams sequentially.
+
+- One buffer of 2^22 frames per channel (~87 s, 32 MiB stereo). The first
+  record pass sets the length (stopped when REC is toggled off); left running,
+  the buffer fills over ~87 s and then plays.
+- **Capture point:** the post-effects signal, just before the master volume
+  (`l`/`r` after the reverb in the signal flow above). Playback is summed back
+  at the same point, so a loop sits at the same level as the live signal.
+- **Overdub** plays the loop and adds the new input on top (`buf += in`), so
+  passes layer without runaway feedback.
+- **Transport & UI:** the LOOPER page's switches are REC, PLAY/STOP and DUB;
+  encoder 1 picks the slot, and SAVE/LOAD stream the loop to/from the SD card
+  (`LOOP0n.RAW`, raw float32: an L plane then an R plane; `build/emu/loops/` in
+  the emulator). Starting REC again clears and re-records.
+- **CPU:** one read and one write per sample per channel, streaming from DDR —
+  negligible next to the delay.
 
 ## MIDI clock follower
 
@@ -239,7 +263,7 @@ exactly one step per encoder click, and ENUMs wrap around.
 | FILTER | DRIVE | 0–100 % | 25 % | lin | 30 |
 | FILTER | MODE | LP / BP | LP | enum | 31 |
 | SPACE | CHORUS | 0–100 % | 40 % | lin | 32, **93** |
-| SPACE | DELAY | 20 ms–2 s | 850 ms | exp | 33 |
+| SPACE | DELAY | 20 ms–120 s | 850 ms | exp | 33 |
 | SPACE | FEEDBACK | 0–95 % | 55 % | lin | 34 |
 | SPACE | DLY MIX | 0–100 % | 25 % | lin | 35 |
 | SPACE | SIZE | 0–100 % | 75 % | lin | 36 |
@@ -312,11 +336,14 @@ are converted on load to the same oscillator count.
   is inferred from the measurements above, not measured on its own. The
   console prints the render average, maximum and load each second, and the
   right display's header shows the load.
-- **Memory** (static `.bss`, about 1.3 MiB):
+- **Memory** (static `.bss`, about 65 MiB, mostly the delay; `.bss` is `NOLOAD`
+  so `fip.bin` stays ~360 KB — the `.bss` zeroing at boot just takes a little
+  longer):
 
   | Buffer | Size |
   |---|---|
-  | delay | 2 × 131072 floats = 1 MiB |
+  | delay | 2 × 8388608 floats = 64 MiB |
+  | loop | 2 × 4194304 floats = 32 MiB |
   | reverb | 8 × 8192 floats = 256 KiB |
   | shimmer | 8192 floats = 32 KiB |
   | chorus | 2 × 2048 floats = 16 KiB |
@@ -363,7 +390,7 @@ are converted on load to the same oscillator count.
   | oscillators, filter, envelope | < 1 KB | L1 | L1, a good fit |
   | chorus | 16 KB | L1 / L2 | misses |
   | reverb | Σ line lengths × 4 B: ~70 KB at SIZE 75 %, ~85 KB at 100 % | fits L2 | misses |
-  | delay | delay time × 2 ch × 4 B: 326 KB at 850 ms, 768 KB at 2 s | streams from DDR (sequential) | streams from DDR |
+  | delay | delay time × 2 ch × 4 B: 326 KB at 850 ms, 23 MB at 60 s | streams from DDR (sequential) | streams from DDR |
 
   - **Effects stay on the main core** (with the vector kernels).
   - **If the coprocessor is used,** its FPU suits voice or oscillator work in

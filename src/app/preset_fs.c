@@ -137,6 +137,48 @@ int preset_fs_root_rename(const char *from, const char *to)
     return 0;
 }
 
+/* Loop-recorder slots: LOOP0n.RAW holds an L plane then an R plane of float32. */
+static void loop_name(int slot, char *dst)
+{
+    static const char h[] = "/LOOP0";
+    for (int i = 0; i < 6; i++) dst[i] = h[i];
+    dst[6] = (char)('0' + slot);
+    dst[7] = '.'; dst[8] = 'R'; dst[9] = 'A'; dst[10] = 'W'; dst[11] = 0;
+}
+
+int preset_fs_loop_save(int slot, const float *l, const float *r, uint32_t frames)
+{
+    if (slot < 1 || slot > 9 || !frames) return -1;
+    char name[12];
+    loop_name(slot, name);
+    if (preset_fs_root_open(name, 1) != 0) return -1;
+    int rc = 0;
+    if (preset_fs_root_write(l, frames * sizeof(float)) != 0) rc = -1;
+    else if (preset_fs_root_write(r, frames * sizeof(float)) != 0) rc = -1;
+    if (preset_fs_root_close() != 0) rc = -1;
+    return rc;
+}
+
+int preset_fs_loop_load(int slot, float *l, float *r, uint32_t max_frames, uint32_t *frames)
+{
+    if (slot < 1 || slot > 9) return -1;
+    char name[12];
+    loop_name(slot, name);
+    uint32_t sz = 0;
+    if (preset_fs_root_size(name, &sz) != 0) return -2;      /* no such file */
+    uint32_t n = sz / (2 * sizeof(float));
+    if (n > max_frames) n = max_frames;
+    if (!n) return -3;
+    if (preset_fs_root_open(name, 0) != 0) return -1;
+    unsigned got = 0;
+    int rc = 0;
+    if (preset_fs_root_read(l, n * sizeof(float), &got) != 0 || got != n * sizeof(float)) rc = -1;
+    else if (preset_fs_root_read(r, n * sizeof(float), &got) != 0 || got != n * sizeof(float)) rc = -1;
+    preset_fs_root_close();
+    if (rc == 0) *frames = n;
+    return rc;
+}
+
 void preset_fs_info(void)
 {
     int m = preset_fs_mount();

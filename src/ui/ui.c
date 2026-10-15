@@ -21,10 +21,13 @@ static uint64_t midi_last, now_cached;
 static uint64_t touched_at[6];
 
 #define PRESET_PAGE  PAGE_COUNT          /* the page after the parameter pages */
-#define UI_PAGES     (PAGE_COUNT + 1)
+#define LOOPER_PAGE  (PAGE_COUNT + 1)    /* then the loop recorder */
+#define UI_PAGES     (PAGE_COUNT + 2)
 #define MSG_MS       2000
 static const ui_store_t *store;
+static const ui_loop_store_t *loop_store;
 static int slot = 1;
+static int loop_slot = 1;
 static char msg[16];
 static uint64_t msg_at;
 
@@ -54,6 +57,7 @@ void ui_init(void)
 }
 
 void ui_set_store(const ui_store_t *s) { store = s; }
+void ui_set_loop_store(const ui_loop_store_t *s) { loop_store = s; }
 
 static void set_msg(const char *a, int n)
 {
@@ -199,6 +203,33 @@ static void preset_result(int r, const char *ok, int n)
     else set_msg("NO CARD", 0);
 }
 
+/* LOOPER page: SAVE writes the recorded loop, LOAD reads one back. */
+static int loop_save_slot(void)
+{
+    if (!loop_store) return -1;
+    uint32_t n = engine_loop_len();
+    if (!n) return -2;
+    return loop_store->save(loop_slot, engine_loop_data(0), engine_loop_data(1), n);
+}
+
+static int loop_load_slot(void)
+{
+    if (!loop_store) return -1;
+    uint32_t n = 0;
+    int r = loop_store->load(loop_slot, engine_loop_edit(0), engine_loop_edit(1),
+                             engine_loop_capacity(), &n);
+    if (r == 0) engine_loop_set_len(n);
+    return r;
+}
+
+static void loop_result(int r, const char *ok)
+{
+    if (r == 0) set_msg(ok, loop_slot);
+    else if (r == -2) set_msg("EMPTY", loop_slot);
+    else if (r == -3) set_msg("BAD FILE", loop_slot);
+    else set_msg("NO STORE", 0);
+}
+
 void ui_enc(int id, int delta)
 {
     if (id < 0 || id > 5) return;
@@ -212,6 +243,15 @@ void ui_enc(int id, int delta)
             while (slot < 1) slot += UI_PRESET_SLOTS;
             while (slot > UI_PRESET_SLOTS) slot -= UI_PRESET_SLOTS;
             preview_refresh(0);
+            touched_at[0] = now_cached ? now_cached : 1;
+        }
+        return;
+    }
+    if (page == LOOPER_PAGE) {
+        if (id == 0) {
+            loop_slot += det;
+            while (loop_slot < 1) loop_slot += UI_LOOP_SLOTS;
+            while (loop_slot > UI_LOOP_SLOTS) loop_slot -= UI_LOOP_SLOTS;
             touched_at[0] = now_cached ? now_cached : 1;
         }
         return;
@@ -251,6 +291,15 @@ void ui_sw(int id, int down)
             preset_result(ui_preset_save(slot), "SAVED", slot);
             preview_refresh(1);
         }
+        return;
+    }
+    if (page == LOOPER_PAGE) {
+        int st = engine_loop_state();
+        if (id == 1) engine_loop_action(LOOP_REC);
+        else if (id == 2) engine_loop_action((st == LOOP_PLAYING || st == LOOP_OVERDUB) ? LOOP_STOP : LOOP_PLAY);
+        else if (id == 3) engine_loop_action(st == LOOP_OVERDUB ? LOOP_PLAY : LOOP_DUB);
+        else if (id == 4) loop_result(loop_save_slot(), "SAVED");
+        else if (id == 5) loop_result(loop_load_slot(), "LOADED");
         return;
     }
     int p = page_param(id);
@@ -395,6 +444,34 @@ static void draw_preset(fb_t *fb, int disp, uint64_t now)
         fb_fill_rect(fb, HALF_W - 1, HDR_H, 1, FB_H - HDR_H, true);
 }
 
+/* LOOPER page: enc 1 turn picks the slot; the switches are the transport. */
+static void draw_looper(fb_t *fb, int disp, uint64_t now)
+{
+    char b[8];
+    switch (disp) {
+    case 0:
+        b[0] = 'L'; b[1] = (char)('0' + loop_slot / 10); b[2] = (char)('0' + loop_slot % 10); b[3] = 0;
+        draw_label(fb, 0, "SLOT", b, "turn");
+        draw_label(fb, HALF_W, "REC", 0, "push");
+        break;
+    case 1:
+        draw_label(fb, 0, "PLAY", 0, "push");
+        draw_label(fb, HALF_W, "DUB", 0, "push");
+        break;
+    default:
+        draw_label(fb, 0, "SAVE", 0, "push");
+        draw_label(fb, HALF_W, "LOAD", 0, "push");
+        if (msg[0] && now - msg_at < MSG_MS)
+            fb_text(fb, (FB_W - fb_text_width(msg, 1)) / 2, BAR_Y, msg, 1, true);
+        break;
+    }
+    for (int e = 2 * disp; e < 2 * disp + 2; e++)
+        if (sw_down[e])
+            fb_invert_rect(fb, (e & 1) * HALF_W, HDR_H, HALF_W, FB_H - HDR_H);
+    if (disp < 2)
+        fb_fill_rect(fb, HALF_W - 1, HDR_H, 1, FB_H - HDR_H, true);
+}
+
 void ui_draw(int disp, fb_t *fb, uint64_t now)
 {
     char buf[20];
@@ -402,12 +479,21 @@ void ui_draw(int disp, fb_t *fb, uint64_t now)
     fb_clear(fb);
     fb_fill_rect(fb, 0, 0, FB_W, HDR_H - 1, true);
     switch (disp) {
-    case 0: {                                   /* page name + x/N */
-        fb_text(fb, 2, 0, page == PRESET_PAGE ? "PRESET" : page_names[page], 1, false);
-        char *b = put_dec(buf, page + 1);
-        *b++ = '/';
-        put_dec(b, UI_PAGES);
-        fb_text(fb, FB_W - 2 - fb_text_width(buf, 1), 0, buf, 1, false);
+    case 0: {                                   /* page name + x/N (or loop state) */
+        fb_text(fb, 2, 0, page == PRESET_PAGE ? "PRESET" : page == LOOPER_PAGE ? "LOOPER" : page_names[page], 1, false);
+        if (page == LOOPER_PAGE) {
+            static const char *const st[4] = { "OFF", "REC", "PLAY", "DUB" };
+            char sb[12], *s = sb;
+            for (const char *c = st[engine_loop_state() & 3]; *c; c++) *s++ = *c;
+            if (engine_loop_len()) { *s++ = ' '; s = put_dec(s, (int)(engine_loop_len() / 48000)); *s++ = 's'; }
+            *s = 0;
+            fb_text(fb, FB_W - 2 - fb_text_width(sb, 1), 0, sb, 1, false);
+        } else {
+            char *b = put_dec(buf, page + 1);
+            *b++ = '/';
+            put_dec(b, UI_PAGES);
+            fb_text(fb, FB_W - 2 - fb_text_width(buf, 1), 0, buf, 1, false);
+        }
         break;
     }
     case 1: {                                   /* MIDI: last message + activity box */
@@ -444,6 +530,10 @@ void ui_draw(int disp, fb_t *fb, uint64_t now)
     }
     if (page == PRESET_PAGE) {
         draw_preset(fb, disp, now);
+        return;
+    }
+    if (page == LOOPER_PAGE) {
+        draw_looper(fb, disp, now);
         return;
     }
     draw_half(fb, 0, 2 * disp, now);
