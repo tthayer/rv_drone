@@ -352,22 +352,31 @@ int engine_voices_active(void)
  * loaded IR (SD card) replaces this later. */
 static float conv_ir[CONV_IR_LEN];
 
+/* Normalise by energy, not peak: a reverb's wet level must not depend on the
+ * IR's length or density. The target is set so CONV's wet matches the FDN's at
+ * the same REVERB setting (a peak-normalised 8192-sample IR measured ~5 dB hot
+ * vs HALL, which saturated the master tanh once REVERB was pushed up). */
+#define CONV_IR_GAIN 10.0f              /* target sqrt(sum ir^2) */
+static void conv_ir_normalise(float *ir, int n)
+{
+    float e = 0.0f;
+    for (int i = 0; i < n; i++) e += ir[i] * ir[i];
+    if (e <= 0.0f) return;
+    float g = CONV_IR_GAIN / __builtin_sqrtf(e);
+    for (int i = 0; i < n; i++) ir[i] *= g;
+}
+
 static void conv_reverb_build_ir(void)
 {
     static int built;
     if (built) return;
     built = 1;
     uint32_t rng = 0x9e3779b9u;
-    float peak = 0.0f;
     for (int i = 0; i < CONV_IR_LEN; i++) {
         float env = dsp_exp2(-6.0f * (float)i / (float)CONV_IR_LEN);   /* ~40 dB decay */
-        float v = dsp_noise(&rng) * env;
-        conv_ir[i] = v;
-        float a = v < 0.0f ? -v : v;
-        if (a > peak) peak = a;
+        conv_ir[i] = dsp_noise(&rng) * env;
     }
-    if (peak > 0.0f)
-        for (int i = 0; i < CONV_IR_LEN; i++) conv_ir[i] /= peak;
+    conv_ir_normalise(conv_ir, CONV_IR_LEN);
 }
 
 /* Push one input sample, pop one output sample (delayed by up to CONV_B). */
@@ -412,11 +421,14 @@ void engine_init(float sr)
 
 void engine_ir_set(const float *ir, int len)
 {
+    static float buf[CONV_P * CONV_B];
     int cap = CONV_P * CONV_B;
     if (len > cap) len = cap;
     if (len < 1) return;
+    for (int i = 0; i < len; i++) buf[i] = ir[i];
+    conv_ir_normalise(buf, len);            /* same level rule as the built-in IR */
     for (int c = 0; c < 2; c++) {
-        conv_init(&E.cr[c].c, ir, len);
+        conv_init(&E.cr[c].c, buf, len);
         E.cr[c].in_n = E.cr[c].out_n = E.cr[c].out_len = 0;
     }
 }

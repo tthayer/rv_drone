@@ -208,10 +208,7 @@ int preset_fs_ir_load(void)
     preset_fs_root_close();
     int n = (int)(got / sizeof(float));
     if (n < 8) return -2;
-    float peak = 0.0f;
-    for (int i = 0; i < n; i++) { float a = buf[i] < 0 ? -buf[i] : buf[i]; if (a > peak) peak = a; }
-    if (peak > 0.0f) for (int i = 0; i < n; i++) buf[i] /= peak;
-    engine_ir_set(buf, n);
+    engine_ir_set(buf, n);          /* the engine normalises by energy */
     return 0;
 }
 

@@ -382,7 +382,36 @@ int main(void)
         CHECK(tail > 1e-3, "CONV reverb: no tail after the note (%.3g)", tail);
     }
 
+    /* 14. CONV reverb level: the IR is energy-normalised, so a full-wet CONV
+     *     sits near HALL's level (a peak-normalised IR was ~5 dB hot and
+     *     saturated the master tanh). */
+    {
+        static const int chord[4] = { 48, 52, 55, 60 };
+        float pk[2];
+        for (int mi = 0; mi < 2; mi++) {
+            engine_init(SR);
+            engine_set_param(P_LATCH, 0);
+            engine_set_param(P_ATTACK, 0.002f); engine_set_param(P_RELEASE, 0.004f);
+            engine_set_param(P_OSCS, 1); engine_set_param(P_DETUNE, 0); engine_set_param(P_DRIFT, 0);
+            engine_set_param(P_SHAPE, 0); engine_set_param(P_SUB, 0); engine_set_param(P_SPREAD, 0);
+            engine_set_param(P_CUTOFF, 12000); engine_set_param(P_FMOD_DEPTH, 0); engine_set_param(P_DRIVE, 0);
+            engine_set_param(P_CHORUS, 0); engine_set_param(P_DLY_MIX, 0);
+            engine_set_param(P_REV_SIZE, 0.75f); engine_set_param(P_DAMP, 0.4f);
+            engine_set_param(P_REV_MIX, 1.0f);
+            engine_set_param(P_REV_MODE, mi == 0 ? 0.0f : 5.0f);   /* HALL / CONV */
+            for (int i = 0; i < 4; i++) engine_note_on(chord[i], 100);
+            for (int s = 0; s < SR / 2; s += 32) engine_render(tl + s, tr + s, 32);
+            float m = 0.0f;
+            for (int i = SR / 4; i < SR / 2; i++) {
+                float a = tl[i] < 0 ? -tl[i] : tl[i];
+                if (a > m) m = a;
+            }
+            pk[mi] = m;
+        }
+        CHECK(pk[1] < pk[0] * 1.5f, "CONV reverb is too hot vs HALL (%.3f vs %.3f)", pk[1], pk[0]);
+    }
+
     if (fails) printf("test_engine: %d FAILED\n", fails);
-    else printf("test_engine: all passed (exp2 %.1e, %d steals faded, STACK partials, shimmer, freeze, velocity, delay, loop, wavetable, fft, conv, conv-reverb ok)\n", worst, steals);
+    else printf("test_engine: all passed (exp2 %.1e, %d steals faded, STACK partials, shimmer, freeze, velocity, delay, loop, wavetable, fft, conv, conv-reverb, conv-level ok)\n", worst, steals);
     return fails != 0;
 }

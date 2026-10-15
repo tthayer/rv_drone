@@ -169,7 +169,7 @@ now folded into the voice-path gain.
     | SHIM 5TH | the same, shifted up 7 st (×1.4983) |
     | SUB OCT | the same, shifted down 12 st, a darker bloom |
     | FREEZE | input fades out (about 20 ms), line gains go to 0.99998 and damping off, so the current tail holds for minutes; the dry sound still plays on top |
-    | CONV | **convolution reverb**: the send is convolved with an impulse response (uniform partitioned overlap-save FFT, `src/engine/conv.c`, 512-sample blocks) instead of the FDN — a room/plate character. The IR is loaded from `/IR.RAW` at boot (`preset_fs_ir_load`), normalised to peak 1; with no file it uses a built-in synthetic IR (decaying noise, ~170 ms). |
+    | CONV | **convolution reverb**: the send is convolved with an impulse response (uniform partitioned overlap-save FFT, `src/engine/conv.c`, 512-sample blocks) instead of the FDN — a room/plate character. The IR is loaded from `/IR.RAW` at boot (`preset_fs_ir_load`); with no file it uses a built-in synthetic IR (decaying noise, ~170 ms). The IR is normalised by **energy**, so the wet level does not depend on its length — a peak-normalised IR was ~5 dB hot against HALL and saturated the master tanh. |
 
   - **Shimmer pitch shifter:** two taps on a 8192-sample buffer of the wet
     sum (L+R). Each tap's delay sweeps across 4096 samples (85 ms) at a rate
@@ -338,6 +338,7 @@ are converted on load to the same oscillator count.
   | 16 voices × 7 osc, RVV | ~390 µs | 29 % |
   | 16 voices × 7 osc, scalar | ~976 µs | 73 % |
   | **16 voices × 16 osc (worst case, console `w`), RVV** | **~648 µs** | **48 %** |
+  | **16 voices × 16 osc, RVV, REV MODE = CONV** | **~1131 µs** | **85 %** |
   | 16 voices × 16 osc, scalar, uncapped | ~1795 µs | 134 %, not real-time, hence the scalar cap of 7 |
   | 16 voices × 16 osc requested, scalar, capped at 7 | ~1001 µs | 75 % |
 
@@ -531,6 +532,16 @@ are converted on load to the same oscillator count.
   underruns. The shifter runs as a per-block pre-pass ahead of
   the reverb loop; offsetting its buffer by 9 cache lines made no difference,
   so the cost is arithmetic, not cache aliasing.
+- **Convolution reverb cost** (2026-10-15, Nano, console `r` then `w`, RVV):
+  REV MODE = CONV replaces the FDN with the partitioned convolution. Worst case
+  (16 voices × 16 osc) is **1131 µs per block, 85 %** of the budget
+  (osc 267, voice 51, chorus 13, delay 7, reverb 530, total 1131). It is
+  real-time, but CONV is the most expensive mode: the convolution adds roughly
+  460 µs over HALL. The cost is arithmetic — a scalar radix-2 FFT plus
+  `CONV_P` complex MACs of length `CONV_N` per block per channel — so a shorter
+  IR (fewer partitions) or a smaller FFT cuts it roughly proportionally.
+  Because the IR is buffered into `CONV_B`-sample blocks, the wet lags the dry
+  by one block (10.7 ms).
 
 ## Working on the engine
 

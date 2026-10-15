@@ -439,8 +439,9 @@ void main(uint64_t hartid, uint64_t fdt)
                 continue;
             }
             if (c == 'r') {                        /* cycle REV MODE (via the UI, CC 48) */
-                int m = ((int)engine_param(P_REV_MODE) + 1) % 5;
-                uint8_t cc[3] = { 0xB0, 20 + P_REV_MODE, (uint8_t)((m * 127 + 2) / 4) };
+                int nv = (int)(param_desc(P_REV_MODE)->max - param_desc(P_REV_MODE)->min) + 1;
+                int m = ((int)engine_param(P_REV_MODE) + 1) % nv;
+                uint8_t cc[3] = { 0xB0, 20 + P_REV_MODE, (uint8_t)((m * 127 + (nv - 1) / 2) / (nv - 1)) };
                 ui_midi(cc, 3, 0);
                 char v[16];
                 param_format(P_REV_MODE, engine_param(P_REV_MODE), v);
