@@ -7,7 +7,7 @@
 
 #define MAX_OSC     OSC_MAX
 #define CTRL        32                  /* control-rate block */
-#define DLY_N       131072              /* > 2 s at 48 kHz, power of 2 */
+#define DLY_N       8388608             /* 2^23 samples ~ 175 s at 48 kHz (64 MiB stereo), power of 2 */
 #define CHO_N       2048
 #define REV_LINES   8
 #define REV_N       8192
@@ -523,7 +523,7 @@ static void render_block(float *outl, float *outr, int n)
     /* ---- chorus: two modulated taps per side, quadrature LFOs ---- */
     float cmix = E.p[P_CHORUS];
     float dly_target = dly_beats > 0.0f ? dly_beats * beat_s * E.sr : E.p[P_DLY_TIME] * 0.001f * E.sr;
-    if (dly_target > 2.0f * E.sr) dly_target = 2.0f * E.sr;
+    if (dly_target > (float)(DLY_N - 2)) dly_target = (float)(DLY_N - 2);
     float dfb = E.p[P_DLY_FB], dmix = E.p[P_DLY_MIX];
     float rmix = E.p[P_REV_MIX];
     float size = E.p[P_REV_SIZE];

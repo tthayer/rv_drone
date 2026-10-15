@@ -97,7 +97,7 @@ of a chord move apart.
 | Enc | Name | Range | What it does | CC |
 |---|---|---|---|---|
 | 1 | CHORUS | 0–100 % [40 %] | chorus amount | 32, 93 |
-| 2 | DELAY | 20 ms–2 s [850 ms] | delay time (when not synced) | 33 |
+| 2 | DELAY | 20 ms–120 s [850 ms] | delay time (when not synced) | 33 |
 | 3 | FEEDBACK | 0–95 % [55 %] | delay repeats; each repeat gets darker | 34 |
 | 4 | DLY MIX | 0–100 % [25 %] | delay level | 35 |
 | 5 | SIZE | 0–100 % [75 %] | reverb size and decay time (1.5–13.5 s) | 36 |

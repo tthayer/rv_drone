@@ -138,7 +138,9 @@ now folded into the voice-path gain.
 - **Delay:**
   - Stereo with cross-fed feedback (ping-pong-like) and a one-pole lowpass in
     the loop, so repeats darken.
-  - Up to 2 s; DELAY sets the time in free mode.
+  - Up to 120 s; DELAY sets the time in free mode. The buffer is 2^23 samples
+    per channel (~175 s, 64 MiB stereo) out of the spare DDR; the delay streams
+    from it sequentially, so the CPU cost is unchanged.
   - The time glides (0.0005 per sample), so changing it bends the pitch like
     tape instead of clicking.
   - FEEDBACK goes up to 95 %; DLY MIX sets the wet level.
@@ -239,7 +241,7 @@ exactly one step per encoder click, and ENUMs wrap around.
 | FILTER | DRIVE | 0–100 % | 25 % | lin | 30 |
 | FILTER | MODE | LP / BP | LP | enum | 31 |
 | SPACE | CHORUS | 0–100 % | 40 % | lin | 32, **93** |
-| SPACE | DELAY | 20 ms–2 s | 850 ms | exp | 33 |
+| SPACE | DELAY | 20 ms–120 s | 850 ms | exp | 33 |
 | SPACE | FEEDBACK | 0–95 % | 55 % | lin | 34 |
 | SPACE | DLY MIX | 0–100 % | 25 % | lin | 35 |
 | SPACE | SIZE | 0–100 % | 75 % | lin | 36 |
@@ -312,11 +314,13 @@ are converted on load to the same oscillator count.
   is inferred from the measurements above, not measured on its own. The
   console prints the render average, maximum and load each second, and the
   right display's header shows the load.
-- **Memory** (static `.bss`, about 1.3 MiB):
+- **Memory** (static `.bss`, about 65 MiB, mostly the delay; `.bss` is `NOLOAD`
+  so `fip.bin` stays ~360 KB — the `.bss` zeroing at boot just takes a little
+  longer):
 
   | Buffer | Size |
   |---|---|
-  | delay | 2 × 131072 floats = 1 MiB |
+  | delay | 2 × 8388608 floats = 64 MiB |
   | reverb | 8 × 8192 floats = 256 KiB |
   | shimmer | 8192 floats = 32 KiB |
   | chorus | 2 × 2048 floats = 16 KiB |
@@ -363,7 +367,7 @@ are converted on load to the same oscillator count.
   | oscillators, filter, envelope | < 1 KB | L1 | L1, a good fit |
   | chorus | 16 KB | L1 / L2 | misses |
   | reverb | Σ line lengths × 4 B: ~70 KB at SIZE 75 %, ~85 KB at 100 % | fits L2 | misses |
-  | delay | delay time × 2 ch × 4 B: 326 KB at 850 ms, 768 KB at 2 s | streams from DDR (sequential) | streams from DDR |
+  | delay | delay time × 2 ch × 4 B: 326 KB at 850 ms, 23 MB at 60 s | streams from DDR (sequential) | streams from DDR |
 
   - **Effects stay on the main core** (with the vector kernels).
   - **If the coprocessor is used,** its FPU suits voice or oscillator work in
