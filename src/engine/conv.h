@@ -2,7 +2,7 @@
  * is split into CONV_B-sample partitions, each transformed once; the live
  * signal is convolved block by block with the radix-2 FFT (fft.c). Latency is
  * one block (CONV_B samples) — fine for a reverb send. Mono IR; run one
- * instance per channel. Call after fft_init(). */
+ * instance per channel. conv_init() calls fft_init() itself. */
 #ifndef CONV_H
 #define CONV_H
 #include <stdint.h>

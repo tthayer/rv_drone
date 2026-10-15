@@ -126,6 +126,8 @@ static int simd_selftest(void)
         a.idt[k] = 1.0f / dt;
         a.gl[k] = 0.3f + 0.1f * (float)k;
         a.gr[k] = 1.0f - a.gl[k];
+        a.wt[k] = NULL;             /* analytic path: test the RVV kernel (a
+                                     * wild pointer here used to fault at boot) */
     }
     b = a;
     float l1[64] = { 0 }, r1[64] = { 0 }, l2[64] = { 0 }, r2[64] = { 0 };

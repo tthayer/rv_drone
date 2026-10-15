@@ -4,6 +4,7 @@
 void conv_init(conv_t *c, const float *ir, int ir_len)
 {
     int p, i;
+    fft_init();                     /* idempotent: build the twiddles if needed */
     for (i = 0; i < CONV_N; i++) c->hist[i] = 0.0f;
     c->pos = 0;
     c->npart = (ir_len + CONV_B - 1) / CONV_B;
