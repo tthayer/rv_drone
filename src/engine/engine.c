@@ -410,6 +410,17 @@ void engine_init(float sr)
     /* silent until a note arrives (MIDI, or the emulator's keyboard / --notes) */
 }
 
+void engine_ir_set(const float *ir, int len)
+{
+    int cap = CONV_P * CONV_B;
+    if (len > cap) len = cap;
+    if (len < 1) return;
+    for (int c = 0; c < 2; c++) {
+        conv_init(&E.cr[c].c, ir, len);
+        E.cr[c].in_n = E.cr[c].out_n = E.cr[c].out_len = 0;
+    }
+}
+
 /* STACK modes: semitone interval and level weight per oscillator (cycling).
  * Detune spread and drift still apply on top. */
 typedef struct { int n; signed char semi[8]; float w[8]; } osc_stack_t;

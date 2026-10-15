@@ -330,6 +330,10 @@ of `float32` samples (any length) in `/WAVE.RAW` at the card root, and it become
 the **CUSTOM** source on the WAVE page at boot (with no file, CUSTOM is a copy of
 SAW).
 
+The **CONV** reverb (REV MODE) takes its impulse response from `/IR.RAW` at the
+card root: a mono `float32` IR (any length, normalised to peak 1). With no file
+it uses a built-in synthetic IR.
+
 ## Nano console commands
 
 UART0, 115200 8N1. Once a second the Nano prints link, panel, engine and DMA

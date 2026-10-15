@@ -149,7 +149,7 @@ footages). UNISON keeps them all on the note. It works best with more OSCS.
 | SHIM 5TH | the same, a fifth up |
 | SUB OCT | the same, an octave down: a darker, lower bloom |
 | FREEZE | the reverb stops taking new sound and holds its current tail for minutes; whatever you play next sounds dry on top |
-| CONV | a **convolution reverb** — the send is convolved with an impulse response (partitioned FFT), a room/plate character. Currently a built-in synthetic IR; loading an IR file from the SD card is coming. |
+| CONV | a **convolution reverb** — the send is convolved with an impulse response (partitioned FFT), a room/plate character. Its impulse response is `/IR.RAW` on the SD card (with no file, a built-in synthetic IR). |
 
 SHIMMER only acts in the three shimmer modes. Larger SIZE makes the shimmer
 longer. To use FREEZE, play the chord with REV MODE on HALL, then switch to

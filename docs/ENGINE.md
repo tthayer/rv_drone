@@ -169,7 +169,7 @@ now folded into the voice-path gain.
     | SHIM 5TH | the same, shifted up 7 st (×1.4983) |
     | SUB OCT | the same, shifted down 12 st, a darker bloom |
     | FREEZE | input fades out (about 20 ms), line gains go to 0.99998 and damping off, so the current tail holds for minutes; the dry sound still plays on top |
-    | CONV | **convolution reverb**: the send is convolved with an impulse response (uniform partitioned overlap-save FFT, `src/engine/conv.c`, 512-sample blocks) instead of the FDN — a room/plate character. Uses a built-in synthetic IR for now; loading an IR from the SD card is the next step. |
+    | CONV | **convolution reverb**: the send is convolved with an impulse response (uniform partitioned overlap-save FFT, `src/engine/conv.c`, 512-sample blocks) instead of the FDN — a room/plate character. The IR is loaded from `/IR.RAW` at boot (`preset_fs_ir_load`), normalised to peak 1; with no file it uses a built-in synthetic IR (decaying noise, ~170 ms). |
 
   - **Shimmer pitch shifter:** two taps on a 8192-sample buffer of the wet
     sum (L+R). Each tap's delay sweeps across 4096 samples (85 ms) at a rate
