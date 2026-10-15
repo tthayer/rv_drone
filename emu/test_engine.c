@@ -9,12 +9,14 @@
  *  7. Velocity scales the note level; velocity 0 is a note off.
  *  8. Delay length: the echo lands at the set time, including 30 s.
  *  9. Loop recorder: record -> loop -> periodic -> overdub.
- * 10. Wavetable oscillator: band-limited (no harmonics above Nyquist). */
+ * 10. Wavetable oscillator: band-limited (no harmonics above Nyquist).
+ * 11. FFT: round-trip identity; an impulse transforms to a flat spectrum. */
 #include <math.h>
 #include <stdio.h>
 #include "dsp.h"
 #include "engine.h"
 #include "params.h"
+#include "fft.h"
 
 static int fails;
 #define CHECK(c, ...) do { if (!(c)) { printf("FAIL: "); printf(__VA_ARGS__); printf("\n"); fails++; } } while (0)
@@ -302,7 +304,38 @@ int main(void)
         CHECK(hi < 0.1 * lo, "wavetable: aliasing (2f0 %.4g, 10f0 %.4g)", lo, hi);
     }
 
+    /* 11. FFT: fft -> ifft is the identity, and an impulse transforms to a flat
+     *     spectrum (twiddle error from dsp_sin1 bounds the tolerance). */
+    {
+        fft_init();
+        const int n = 1024;
+        static float re[FFT_MAX], im[FFT_MAX], sr[FFT_MAX];
+        for (int i = 0; i < n; i++) {
+            re[i] = ((float)((i * 37) % 101) / 50.0f) - 1.0f;      /* -1..1, deterministic */
+            im[i] = 0.0f;
+            sr[i] = re[i];
+        }
+        fft(re, im, n, 0);
+        fft(re, im, n, 1);
+        float err = 0;
+        for (int i = 0; i < n; i++) {
+            float e = re[i] - sr[i]; if (e < 0) e = -e; if (e > err) err = e;
+            if (im[i] < 0) { float q = -im[i]; if (q > err) err = q; } else if (im[i] > err) err = im[i];
+        }
+        CHECK(err < 0.02f, "FFT round trip error %.4g", err);
+
+        for (int i = 0; i < n; i++) { re[i] = 0.0f; im[i] = 0.0f; }
+        re[0] = 1.0f;
+        fft(re, im, n, 0);
+        float flat = 0;
+        for (int k = 0; k < n; k++) {
+            float e = re[k] - 1.0f; if (e < 0) e = -e; if (e > flat) flat = e;
+            if (im[k] < 0) { float q = -im[k]; if (q > flat) flat = q; } else if (im[k] > flat) flat = im[k];
+        }
+        CHECK(flat < 0.02f, "FFT impulse not flat (max dev %.4g)", flat);
+    }
+
     if (fails) printf("test_engine: %d FAILED\n", fails);
-    else printf("test_engine: all passed (exp2 %.1e, %d steals faded, STACK partials, shimmer, freeze, velocity, delay, loop, wavetable ok)\n", worst, steals);
+    else printf("test_engine: all passed (exp2 %.1e, %d steals faded, STACK partials, shimmer, freeze, velocity, delay, loop, wavetable, fft ok)\n", worst, steals);
     return fails != 0;
 }
