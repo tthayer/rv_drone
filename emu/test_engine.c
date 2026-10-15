@@ -11,7 +11,8 @@
  *  9. Loop recorder: record -> loop -> periodic -> overdub.
  * 10. Wavetable oscillator: band-limited (no harmonics above Nyquist).
  * 11. FFT: round-trip identity; an impulse transforms to a flat spectrum.
- * 12. Convolution: partitioned FFT convolution matches a direct FIR. */
+ * 12. Convolution: partitioned FFT convolution matches a direct FIR.
+ * 13. Convolution reverb (REV MODE = CONV): a burst leaves a decaying tail. */
 #include <math.h>
 #include <stdio.h>
 #include "dsp.h"
@@ -360,7 +361,28 @@ int main(void)
         CHECK(maxerr < 5e-3f, "partitioned convolution vs direct FIR: max err %.4g", maxerr);
     }
 
+    /* 13. Convolution reverb (REV MODE = CONV): a short burst leaves a decaying
+     *     tail after the dry note is gone. */
+    {
+        engine_init(SR);
+        engine_set_param(P_LATCH, 0);
+        engine_set_param(P_ATTACK, 0.002f); engine_set_param(P_RELEASE, 0.005f);
+        engine_set_param(P_OSCS, 3); engine_set_param(P_DETUNE, 0); engine_set_param(P_DRIFT, 0);
+        engine_set_param(P_SHAPE, 0); engine_set_param(P_SUB, 0); engine_set_param(P_SPREAD, 0);
+        engine_set_param(P_CUTOFF, 12000); engine_set_param(P_FMOD_DEPTH, 0); engine_set_param(P_DRIVE, 0);
+        engine_set_param(P_CHORUS, 0); engine_set_param(P_DLY_MIX, 0);
+        engine_set_param(P_REV_MIX, 1.0f); engine_set_param(P_REV_MODE, 5);   /* CONV */
+        engine_note_on(60, 127);
+        for (int s = 0; s < SR; s += 32) {
+            if (s >= 32 && s < 64) engine_note_off(60);
+            engine_render(tl + s, tr + s, 32);
+        }
+        double tail = 0;                                   /* [0.05 s, 0.2 s] */
+        for (int i = SR / 20; i < SR / 5; i++) tail += (double)tl[i] * tl[i];
+        CHECK(tail > 1e-3, "CONV reverb: no tail after the note (%.3g)", tail);
+    }
+
     if (fails) printf("test_engine: %d FAILED\n", fails);
-    else printf("test_engine: all passed (exp2 %.1e, %d steals faded, STACK partials, shimmer, freeze, velocity, delay, loop, wavetable, fft, conv ok)\n", worst, steals);
+    else printf("test_engine: all passed (exp2 %.1e, %d steals faded, STACK partials, shimmer, freeze, velocity, delay, loop, wavetable, fft, conv, conv-reverb ok)\n", worst, steals);
     return fails != 0;
 }

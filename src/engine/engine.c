@@ -4,6 +4,7 @@
 #include "dsp.h"
 #include "osc.h"
 #include "voice.h"
+#include "conv.h"
 
 #define MAX_OSC     OSC_MAX
 #define CTRL        32                  /* control-rate block */
@@ -33,10 +34,15 @@ _Static_assert((int)SHIM_MIN >= CTRL, "the shimmer pre-pass must only read earli
  * SIZE 0.75); 0.15 keeps every tail decaying. */
 #define SHIM_FB     0.15f
 #define FREEZE_G    0.99998f            /* per pass: holds for minutes, can't grow */
-enum { REV_HALL, REV_SHIM_OCT, REV_SHIM_5TH, REV_SUB_OCT, REV_FREEZE };
+enum { REV_HALL, REV_SHIM_OCT, REV_SHIM_5TH, REV_SUB_OCT, REV_FREEZE, REV_CONV };
 #define DLY_PAD     (16 * 5)
 
 typedef struct { float ic1, ic2; } svf_t;
+
+/* One stereo channel of the partitioned convolution reverb (issue #4): the
+ * convolver plus the block in/out staging (CONV_B samples each). */
+typedef struct { conv_t c; float in[CONV_B], out[CONV_B]; int in_n, out_n, out_len; } creverb_t;
+#define CONV_IR_LEN 8192                /* built-in synthetic IR, samples (~170 ms) */
 
 typedef struct {
     int note;                           /* -1 = unused */
@@ -92,6 +98,7 @@ static struct {
     float shim_ph, shim_lp, shim_dc;
     float rev_in_s;                     /* smoothed reverb input gain (0 in FREEZE) */
     float shim_s;                       /* smoothed shimmer feedback */
+    creverb_t cr[2];                    /* convolution reverb (REV MODE = CONV) */
     /* MIDI clock */
     uint32_t clk_last_t;
     int clk_have_last;
@@ -340,6 +347,41 @@ int engine_voices_active(void)
     return n;
 }
 
+/* ---- convolution reverb (REV MODE = CONV, issue #4) ---- *
+ * Built-in synthetic IR: an exponentially decaying noise burst (~170 ms). A
+ * loaded IR (SD card) replaces this later. */
+static float conv_ir[CONV_IR_LEN];
+
+static void conv_reverb_build_ir(void)
+{
+    static int built;
+    if (built) return;
+    built = 1;
+    uint32_t rng = 0x9e3779b9u;
+    float peak = 0.0f;
+    for (int i = 0; i < CONV_IR_LEN; i++) {
+        float env = dsp_exp2(-6.0f * (float)i / (float)CONV_IR_LEN);   /* ~40 dB decay */
+        float v = dsp_noise(&rng) * env;
+        conv_ir[i] = v;
+        float a = v < 0.0f ? -v : v;
+        if (a > peak) peak = a;
+    }
+    if (peak > 0.0f)
+        for (int i = 0; i < CONV_IR_LEN; i++) conv_ir[i] /= peak;
+}
+
+/* Push one input sample, pop one output sample (delayed by up to CONV_B). */
+static float conv_reverb(creverb_t *r, float x)
+{
+    float y = r->out_n < r->out_len ? r->out[r->out_n++] : 0.0f;
+    r->in[r->in_n++] = x;
+    if (r->in_n >= CONV_B) {
+        conv_process(&r->c, r->in, r->out);
+        r->in_n = 0; r->out_n = 0; r->out_len = CONV_B;
+    }
+    return y;
+}
+
 void engine_init(float sr)
 {
     /* Clear everything, effect buffers included, so a re-init (tests, emulator)
@@ -353,6 +395,8 @@ void engine_init(float sr)
     E.inv_sr = 1.0f / sr;
     E.rng = 0x12345678u;
     osc_wavetable_init();
+    conv_reverb_build_ir();
+    for (int ci = 0; ci < 2; ci++) conv_init(&E.cr[ci].c, conv_ir, CONV_IR_LEN);
     for (int i = 0; i < P_COUNT; i++) E.p[i] = param_desc(i)->def;
     for (int i = 0; i < ENGINE_VOICES; i++) {
         E.v[i].note = -1; E.v[i].env = 0; E.v[i].gate = 0; E.v[i].pending = -1;
@@ -581,6 +625,7 @@ static void render_block(float *outl, float *outr, int n)
     float damp = 0.05f + 0.85f * E.p[P_DAMP];             /* lowpass amount in the loop */
     int rmode = (int)E.p[P_REV_MODE];
     int freeze = rmode == REV_FREEZE;
+    int conv_mode = rmode == REV_CONV;      /* convolution reverb (issue #4) */
     if (freeze) damp = 0.0f;                              /* hold the spectrum as it is */
     for (int j = 0; j < REV_LINES; j++) {
         float len = rev_base[j] * (0.5f + 1.3f * size);
@@ -591,7 +636,7 @@ static void render_block(float *outl, float *outr, int n)
     float shim_t = (rmode > REV_HALL && rmode < REV_FREEZE) ? E.p[P_SHIMMER] : 0.0f;
     float shim_step = rmode > REV_HALL && rmode < REV_FREEZE ? (1.0f - shim_ratio[rmode]) / SHIM_W : 0.0f;
     float rin_t = freeze ? 0.0f : 0.3f;
-    int shim_on = shim_t > 0.0f || E.shim_s > 1e-4f;
+    int shim_on = !conv_mode && (shim_t > 0.0f || E.shim_s > 1e-4f);
     if (!shim_on) E.shim_s = 0.0f;
     E.cho_ph += 0.23f * (float)n * E.inv_sr;
     if (E.cho_ph >= 1.0f) E.cho_ph -= 1.0f;
@@ -657,13 +702,19 @@ static void render_block(float *outl, float *outr, int n)
     /* FDN reverb pass (8 lines, Hadamard feedback, per-line damping) + output */
     for (int i = 0; i < n; i++) {
         float l = outl[i], r = outr[i];
+        float wetl, wetr;
+        if (conv_mode) {
+            wetl = conv_reverb(&E.cr[0], l * 0.3f);
+            wetr = conv_reverb(&E.cr[1], r * 0.3f);
+        } else {
         float x[REV_LINES];
         for (int j = 0; j < REV_LINES; j++) {
             float y = E.rev[j][(E.rev_w - E.rev_lenI[j]) & (REV_N - 1)];
             E.rev_lp[j] += (y - E.rev_lp[j]) * (1.0f - damp);
             x[j] = E.rev_lp[j] * E.rev_g[j];
         }
-        float wetl = x[0] + x[2] + x[4] + x[6], wetr = x[1] + x[3] + x[5] + x[7];
+        wetl = x[0] + x[2] + x[4] + x[6];
+        wetr = x[1] + x[3] + x[5] + x[7];
         E.shim[(E.shim_w + i) & (SHIM_N - 1)] = wetl + wetr;
         float fb = shim_fb[i];
         for (int s = 1; s < REV_LINES; s <<= 1)            /* fast Hadamard */
@@ -678,6 +729,7 @@ static void render_block(float *outl, float *outr, int n)
         for (int j = 0; j < REV_LINES; j++)
             E.rev[j][E.rev_w & (REV_N - 1)] = dsp_flush(x[j] * 0.35355339f + ((j & 1) ? inr : inl) * ((j & 2) ? -1.0f : 1.0f));
         E.rev_w++;
+        }
         l += rmix * wetl * 0.35f;
         r += rmix * wetr * 0.35f;
         /* Loop recorder: capture the post-effects signal (pre master volume),

@@ -29,7 +29,7 @@ describes what it does, how it is driven, and how it runs on the Nano.
  sum of voices x mix gain (1 up to 4 voices, then 2/sqrt(n))
   --> chorus (2 modulated taps per side, CHORUS)
   --> feedback delay (stereo, cross-fed, damped, DELAY/FEEDBACK/DLY MIX)
-  --> FDN reverb (8 lines, SIZE/DAMP/REVERB; REV MODE: hall, shimmer, freeze)
+  --> reverb: FDN (hall, shimmer, freeze) or CONV (partitioned IR convolution)
         ^-- pitch shifter (+12 / +7 / -12 st) on the wet sum, fed back (SHIMMER)
   --> loop recorder (capture the post-effects signal, add the loop playback)
   --> volume (VOLUME^2, smoothed) --> soft clip --> L/R float, about +-1
@@ -169,6 +169,7 @@ now folded into the voice-path gain.
     | SHIM 5TH | the same, shifted up 7 st (×1.4983) |
     | SUB OCT | the same, shifted down 12 st, a darker bloom |
     | FREEZE | input fades out (about 20 ms), line gains go to 0.99998 and damping off, so the current tail holds for minutes; the dry sound still plays on top |
+    | CONV | **convolution reverb**: the send is convolved with an impulse response (uniform partitioned overlap-save FFT, `src/engine/conv.c`, 512-sample blocks) instead of the FDN — a room/plate character. Uses a built-in synthetic IR for now; loading an IR from the SD card is the next step. |
 
   - **Shimmer pitch shifter:** two taps on a 8192-sample buffer of the wet
     sum (L+R). Each tap's delay sweeps across 4096 samples (85 ms) at a rate
@@ -285,7 +286,7 @@ exactly one step per encoder click, and ENUMs wrap around.
 | MODES | LFO DIV | FREE, 1/4 … 8 BAR | FREE | enum | 45 |
 | MODES | DLY DIV | FREE, 1/16 … 1/2 | FREE | enum | 46 |
 | MODES | STACK | UNISON, OCTAVES, FIFTHS, ORGAN | UNISON | enum | 47 |
-| MODES | REV MODE | HALL, SHIM OCT, SHIM 5TH, SUB OCT, FREEZE | HALL | enum | 48 |
+| MODES | REV MODE | HALL, SHIM OCT, SHIM 5TH, SUB OCT, FREEZE, CONV | HALL | enum | 48 |
 | MODES | SHIMMER | 0–100 % (shimmer modes only) | 50 % | lin | 49 |
 | WAVE | WAVE | ANALOG, SAW, SQUARE, ORGAN, CUSTOM | ANALOG | enum | 50 |
 
@@ -355,6 +356,7 @@ are converted on load to the same oscillator count.
   | wavetables | 4 × 10 × 1025 floats = 160 KiB |
   | reverb | 8 × 8192 floats = 256 KiB |
   | shimmer | 8192 floats = 32 KiB |
+  | conv reverb | 2 × (partitioned IR + input spectra) ≈ 1 MiB (issue #4) |
   | chorus | 2 × 2048 floats = 16 KiB |
 
 - **Cores and caches** (SG2002 TRM, Diagram 2.1 "System Framework" and §2.3.1):
