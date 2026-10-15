@@ -17,6 +17,8 @@ enum {
     P_SYNC, P_LFO_DIV, P_DLY_DIV,
     /* (same page, MODES) oscillator interval stacking, reverb mode */
     P_STACK, P_REV_MODE, P_SHIMMER,
+    /* WAVE: oscillator source (analytic morph, or a band-limited wavetable) */
+    P_WAVE,
     P_COUNT
 };
 
@@ -32,7 +34,7 @@ typedef struct {
     float step;                 /* normalised change per encoder detent */
 } param_desc_t;
 
-#define PAGE_COUNT 5     /* the last page may hold fewer than 6 (empty halves) */
+#define PAGE_COUNT 6     /* the last page may hold fewer than 6 (empty halves) */
 #define PAGE_PARAMS 6
 extern const char *const page_names[PAGE_COUNT];
 

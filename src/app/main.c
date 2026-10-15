@@ -313,6 +313,7 @@ void main(uint64_t hartid, uint64_t fdt)
     { static const ui_loop_store_t ls = { preset_fs_loop_save, preset_fs_loop_load };
       ui_set_loop_store(&ls); }
     preset_fs_info();
+    if (preset_fs_wavetable_load() == 0) uart_puts("wave: WAVE.RAW loaded into CUSTOM\n");
     ui_boot_preset();
     uart_puts("m8: 'i' = SD info, 'F' twice = format card, 'S'/'L' = save/load slot 1, "
               "'u' = firmware update\n");

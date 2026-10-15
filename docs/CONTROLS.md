@@ -154,7 +154,20 @@ SHIMMER only acts in the three shimmer modes. Larger SIZE makes the shimmer
 longer. To use FREEZE, play the chord with REV MODE on HALL, then switch to
 FREEZE while it rings. Switch back to HALL to let the frozen tail decay.
 
-### 6. PRESET
+### 6. WAVE
+
+| Control | Action |
+|---|---|
+| Turn encoder 1 | oscillator source: ANALOG, SAW, SQUARE, ORGAN, CUSTOM |
+| Push encoder 1 | back to the OSC page |
+
+ANALOG is the usual sine→saw morph (SHAPE). The others are **band-limited
+single-cycle wavetables** built into the engine; every note picks the octave's
+tables so nothing aliases. **CUSTOM** is loaded at boot from /WAVE.RAW on the
+SD card (one single cycle of float32, any length); with no file it is a copy of
+SAW. The remaining halves of this page are empty.
+
+### 7. PRESET
 
 | Control | Action |
 |---|---|
@@ -171,7 +184,7 @@ and size, attack and release. A message confirms each action: `LOADED 03`,
 Loading or saving a slot also makes it the one loaded at the next power-up.
 Presets are text files on the SD card, `/presets/P01.TXT` to `P16.TXT`.
 
-### 7. LOOPER
+### 8. LOOPER
 
 | Control | Action |
 |---|---|

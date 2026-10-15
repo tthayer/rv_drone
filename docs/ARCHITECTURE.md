@@ -559,7 +559,7 @@ chord. The engine starts silent; notes come from MIDI (it latched a D2 + A2
 drone at boot until 2026-10-07).
 CCs: 1 mod depth, 7 volume, 71 reso, 72 release, 73 attack, 74 cutoff,
 91 reverb, 93 chorus, 20–49 = parameters 0–29 in page order (44 SYNC,
-45 LFO DIV, 46 DLY DIV, 47 STACK, 48 REV MODE, 49 SHIMMER); 123 = all off.
+45 LFO DIV, 46 DLY DIV, 47 STACK, 48 REV MODE, 49 SHIMMER, 50 WAVE); 123 = all off.
 Pages: OSC, FILTER, SPACE, AMP, MODES (clock sync, divisions, STACK, reverb
 mode, shimmer), then PRESET.
 

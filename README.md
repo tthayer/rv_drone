@@ -323,6 +323,11 @@ settings, so you can tell slots apart before loading:
 
 It shows `EMPTY` or `NO CARD` when there's nothing to show. Insert or remove the card only with the power off.
 
+A custom oscillator waveform can live on the card too: put **one single cycle**
+of `float32` samples (any length) in `/WAVE.RAW` at the card root, and it becomes
+the **CUSTOM** source on the WAVE page at boot (with no file, CUSTOM is a copy of
+SAW).
+
 ## Nano console commands
 
 UART0, 115200 8N1. Once a second the Nano prints link, panel, engine and DMA

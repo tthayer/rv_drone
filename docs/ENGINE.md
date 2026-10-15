@@ -91,6 +91,13 @@ into control blocks internally.
   | ORGAN | 0, +12, +19, +24, +28, +31, +36, −12 (8′ 4′ 2⅔′ 2′ 1⅗′ 1⅓′ 1′ 16′) | 1, .8, .6, .55, .45, .4, .35, .7 |
 - **Waveform:** a crossfade from sine to **polyBLEP saw**, set by SHAPE
   (0 = pure sine, 1 = band-limited saw).
+- **WAVE (source):** ANALOG (the morph above) or a **band-limited single-cycle
+  wavetable** in DDR — SAW, SQUARE, ORGAN, or a CUSTOM cycle loaded from
+  `WAVE.RAW`. Each table has 10 MIP levels (harmonic caps 512…1); the
+  oscillator selects the level whose harmonics stay under Nyquist for its pitch,
+  so there is no aliasing. The lookup is **scalar**: XTheadVector has no indexed
+  load, so wavetable notes use the scalar path even when the RVV kernels are
+  selected (SHAPE is ignored for a wavetable).
 - **Stereo:** neighbouring oscillators are panned to opposite sides with an
   equal-power law; SPREAD sets the width.
 - **Level:** the bank is normalised by roughly 1/√N, so changing OSCS doesn't
@@ -280,6 +287,7 @@ exactly one step per encoder click, and ENUMs wrap around.
 | MODES | STACK | UNISON, OCTAVES, FIFTHS, ORGAN | UNISON | enum | 47 |
 | MODES | REV MODE | HALL, SHIM OCT, SHIM 5TH, SUB OCT, FREEZE | HALL | enum | 48 |
 | MODES | SHIMMER | 0–100 % (shimmer modes only) | 50 % | lin | 49 |
+| WAVE | WAVE | ANALOG, SAW, SQUARE, ORGAN, CUSTOM | ANALOG | enum | 50 |
 
 CC values 0–127 map to a position of 0–1. CC 123 is All Notes Off.
 
@@ -344,6 +352,7 @@ are converted on load to the same oscillator count.
   |---|---|
   | delay | 2 × 8388608 floats = 64 MiB |
   | loop | 2 × 4194304 floats = 32 MiB |
+  | wavetables | 4 × 10 × 1025 floats = 160 KiB |
   | reverb | 8 × 8192 floats = 256 KiB |
   | shimmer | 8192 floats = 32 KiB |
   | chorus | 2 × 2048 floats = 16 KiB |

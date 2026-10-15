@@ -26,4 +26,7 @@ int preset_fs_root_rename(const char *from, const char *to);
  * then an R plane of `frames` samples each. */
 int preset_fs_loop_save(int slot, const float *l, const float *r, uint32_t frames);
 int preset_fs_loop_load(int slot, float *l, float *r, uint32_t max_frames, uint32_t *frames);
+
+/* WAVE.RAW (one float32 cycle) into the CUSTOM wavetable; 0 ok. */
+int preset_fs_wavetable_load(void);
 #endif
