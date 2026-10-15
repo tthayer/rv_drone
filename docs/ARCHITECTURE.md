@@ -422,6 +422,17 @@ gets `a1` = 0x80080000 pointing at that DTB (hartid in `a0`).
 fiptool LZMA-wraps the payload, and the FSBL accepts it. This was verified
 on hardware on 2026-10-01.
 
+The boot image can also be replaced **in place while the Nano runs**: the
+console `u` command (`src/app/firmware_update.c`) receives a new `fip.bin` over
+UART0, stages it as `/fip.new`, verifies size and CRC-32 (and re-reads the
+staged file), swaps it in over `/fip.bin` and reboots. The SD card stays in the
+board. `make upload` drives it; verified on hardware (2026-10-12). For speed it
+raises UART0 to divisor 2 (781250 baud on the 25 MHz clock) for the transfer and
+stops the audio link (the engine is silent and Pico A underruns until the
+reboot); the result is reported back at the console baud, where the host reads
+it. An image older than this has no such command, so bootstrap it once over
+SD/USB.
+
 ## Software structure
 
 ```

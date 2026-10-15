@@ -17,6 +17,7 @@
 #include "cpuclk.h"
 #include "ui.h"
 #include "preset_fs.h"
+#include "firmware_update.h"
 #include "sd.h"
 #ifdef BOARD_HAS_SPI_LINK
 #include "spi.h"
@@ -311,7 +312,8 @@ void main(uint64_t hartid, uint64_t fdt)
     ui_set_store(&preset_fs_store);
     preset_fs_info();
     ui_boot_preset();
-    uart_puts("m8: 'i' = SD info, 'F' twice = format card, 'S'/'L' = save/load slot 1\n");
+    uart_puts("m8: 'i' = SD info, 'F' twice = format card, 'S'/'L' = save/load slot 1, "
+              "'u' = firmware update\n");
     uint64_t format_armed = 0;
 #endif
 
@@ -484,6 +486,10 @@ void main(uint64_t hartid, uint64_t fdt)
 #endif
 #ifdef BOARD_HAS_SD
             if (c == 'i') { preset_fs_info(); continue; }
+            if (c == 'u') {                        /* in-place firmware update */
+                firmware_update_receive();
+                continue;
+            }
             if (c == 'S' || c == 'L') {
                 int r = c == 'S' ? ui_preset_save(1) : ui_preset_load(1);
                 uart_puts(c == 'S' ? "preset: save slot 1 -> " : "preset: load slot 1 -> ");

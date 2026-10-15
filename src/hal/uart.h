@@ -15,6 +15,9 @@ extern uint32_t uart_tx_dropped;
 void uart_enable_rx_irq(void);   /* IER.ERBFI + PLIC registration */
 int uart_getc_nonblock(void);    /* -1 if empty */
 
+uint32_t uart_divisor(void);           /* current console divisor (DLL/DLH) */
+void uart_set_divisor(uint32_t div);   /* reprogram baud; waits for the line to drain */
+
 extern uint32_t uart_isr_count, uart_busy_count;
 void uart_dump_regs(void);
 void uart_report_clock(void);    /* console's real baud + UART clock source (read-only) */

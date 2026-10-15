@@ -39,7 +39,8 @@ SRCS := src/boot/start.S src/boot/trap.S src/hal/uart.c src/hal/trap.c \
        src/hal/timer.c src/hal/plic.c src/hal/reset.c src/hal/cache.c src/hal/dma.c src/app/main.c \
        src/engine/engine.c src/engine/osc.c src/engine/voice.c src/engine/params.c src/ui/ui.c src/hal/vec.c src/hal/cpuclk.c
 ifeq ($(BOARD),nano)
-SRCS += src/hal/pinmux.c src/hal/gpio.c src/hal/spi.c src/hal/sd.c src/fs/diskio.c src/app/preset_fs.c
+SRCS += src/hal/pinmux.c src/hal/gpio.c src/hal/spi.c src/hal/sd.c src/fs/diskio.c \
+        src/app/preset_fs.c src/app/firmware_update.c
 FATFS := third_party/fatfs/ff.c
 endif
 SRCS += src/drivers/audio_link.c src/drivers/panel_link.c src/app/panel_ui.c
@@ -123,6 +124,15 @@ usbboot: fip
 	$(if $(RESET_PORT),stty -f $(RESET_PORT) 115200 raw -echo clocal && printf '\022' > $(RESET_PORT))
 	$(PYTHON) tools/usbboot.py build/nano/fip.bin --magic $(USB_DL_MAGIC)
 
+# Update the boot image on the SD card without removing it: push build/nano/fip.bin
+# to a running Nano over UART0 (the console 'u' command). The Nano stages it as
+# /fip.new, verifies it, swaps it in over /fip.bin and reboots. UPLOAD_PORT defaults
+# to RESET_PORT (the same UART0 device usbboot resets).
+UPLOAD_PORT ?= $(RESET_PORT)
+upload: fip
+	@[ -n "$(UPLOAD_PORT)" ] || { echo "set UPLOAD_PORT (UART0 serial device, e.g. /dev/cu.usbserial-XXXX)"; exit 1; }
+	$(PYTHON) tools/upload-fip.py build/nano/fip.bin --port $(UPLOAD_PORT)
+
 # Pico firmware (Pico A audio, Pico B panel). Needs:
 #   tools/get-pico-sdk.sh, arm-none-eabi-gcc with newlib, ninja, cmake, picotool.
 # PICO_TOOLCHAIN_PATH is a bin dir; defaults to a user-local Arm GNU toolchain
@@ -194,7 +204,7 @@ emu-wav: emu
 clean:
 	rm -rf build
 
-.PHONY: FORCE emu emu-wav test-presets test-engine wiring all run-qemu opensbi fip usbboot pico pico-flash-audio pico-flash-panel test-panel test-link clean
+.PHONY: FORCE emu emu-wav test-presets test-engine wiring all run-qemu opensbi fip usbboot upload pico pico-flash-audio pico-flash-panel test-panel test-link clean
 
 # Header dependencies (after all rules so 'all' stays the default goal).
 -include $(OBJS:.o=.d)

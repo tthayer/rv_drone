@@ -256,8 +256,46 @@ To boot each build:
    board yourself.
 2. The image is pushed over USB and runs. Watch UART0 for its output.
 
-The connection needs USB-C from the Nano to the Mac (data plus power) and
-no SD card, or one without `fip.bin`. A boot takes about 20–40 s.
+The connection needs **a data-capable USB-C cable** from the Nano to the Mac
+(a charge-only cable enumerates nothing and `make usbboot` fails with "ROM
+download device not found") and **no bootable SD** — pull the card, or
+rename/delete `fip.bin`, or the ROM boots the card instead of falling through
+to USB (Ctrl-R from a running image warm-resets into that same ROM flow). A boot
+takes about 20–40 s.
+
+## Update the firmware without removing the card
+
+Once the Nano runs an image with the `u` console command (this one or later),
+you can replace the boot image on the SD card in place, with the card left in
+the board:
+
+    make upload UPLOAD_PORT=/dev/cu.usbserial-XXXX
+
+`UPLOAD_PORT` is the UART0 adapter (the same device `RESET_PORT` names; it
+defaults to `RESET_PORT`). The target runs `make fip` first, so the image sent
+is always freshly built. **Verified on hardware (2026-10-12):** the Nano wrote
+`/fip.bin` in place and booted it on the next reset.
+
+The Nano stages the image as `/fip.new`, checks its length and CRC-32, re-reads
+it from the card to verify what landed there, then replaces `/fip.bin` and
+reboots into it. `/fip.bin` is only touched after the staged copy verifies, so a
+failed or interrupted upload leaves the old image bootable. No card removal and
+no USB boot are needed.
+
+**The update interrupts the audio on purpose, to go faster.** It switches UART0
+from the ~111.6 kbaud console to divisor 2 = **781250 baud** (7x) for the
+transfer, and stops feeding the audio link, so the engine goes silent and Pico
+A underruns until the reboot. The result (`fwup: done` / `fwup: fail`) is
+printed back at the console baud, where the host reads it. Divisor 1
+(1.5625 Mbaud) also carries the data, but many adapters (an FT232R, for one)
+can't hold its return path cleanly; the divisor is build-time:
+
+    make EXTRA_CFLAGS=-DFW_UPLOAD_DIV=1 upload UPLOAD_PORT=...   # 1562500 baud
+    make EXTRA_CFLAGS=-DFW_UPLOAD_DIV=4 upload UPLOAD_PORT=...   # 390625 baud
+
+Bootstrap: an older image without the command echoes `rx: 'u'` instead of
+starting the transfer. Boot that image once the old way (SD card or
+`make usbboot`) and update it with `u`; after that, `make upload` works.
 
 ## SD card and presets
 
@@ -305,6 +343,7 @@ and the console's real baud rate and UART clock source (`uart: ...`).
 | `i` | SD card and volume info |
 | `F` `F` (within 3 s) | format the SD card (erases it) |
 | `S` / `L` | save / load preset slot 1 |
+| `u` | receive a new firmware image on UART0, replace `/fip.bin`, reboot (see "Update the firmware without removing the card") |
 
 ## Repo hooks
 

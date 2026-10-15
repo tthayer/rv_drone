@@ -14,7 +14,15 @@
 #define LSR_DR   0x01
 #define LSR_THRE 0x20
 
-#define RX_N 64      /* power of 2; SPSC: ISR writes head, main writes tail */
+#define UART_LCR 3   /* line control; bit 7 = DLAB (DLL/DLH access) */
+#define UART_DLL 0   /* divisor latch low (DLAB) */
+#define UART_DLH 1   /* divisor latch high (DLAB) */
+#define LSR_TEMT 0x40
+
+/* Power of 2; SPSC: ISR writes head, main writes tail. Sized to ride out a
+ * blocking SD write during the 1.5625 Mbaud firmware upload (a 512 B payload
+ * at that rate is ~3.3 ms). */
+#define RX_N 512
 static volatile uint8_t rx_buf[RX_N];
 static volatile uint32_t rx_head, rx_tail;
 
@@ -162,6 +170,28 @@ void uart_dump_regs(void)
 #endif
 }
 
+uint32_t uart_divisor(void)
+{
+    uint8_t lcr = *reg(UART_LCR);
+    *reg(UART_LCR) = lcr | 0x80;              /* DLAB: DLL/DLH */
+    uint32_t div = (uint32_t)*reg(UART_DLL) | (uint32_t)*reg(UART_DLH) << 8;
+    *reg(UART_LCR) = lcr;
+    return div;
+}
+
+/* Reprogram the console baud (both directions). The line must be idle: waits
+ * for the transmitter to drain so no byte goes out at the wrong rate. */
+void uart_set_divisor(uint32_t div)
+{
+    while (!(*reg(UART_LSR) & LSR_TEMT))
+        ;
+    uint8_t lcr = *reg(UART_LCR);
+    *reg(UART_LCR) = lcr | 0x80;
+    *reg(UART_DLL) = (uint8_t)div;
+    *reg(UART_DLH) = (uint8_t)(div >> 8);
+    *reg(UART_LCR) = lcr;
+}
+
 /* Read-only report of the console's real baud rate. The UART clock is
  * clk_cam0_200, shared by UART0..4 (SG2002 TRM clock chapter,
  * clksource_preset_freq_div_param: clk_uart0..4 <- clk_cam0_200, preset xtal 25 MHz):
@@ -170,10 +200,6 @@ void uart_dump_regs(void)
  * [20:16] factor). The vendor clk-cv181x.c lists the parents as {osc, osc,
  * disppll} instead; this follows the TRM. Reads the divisor latch (DLAB briefly
  * set, line idle, polled mode). Call before uart_async_tx(1). */
-#define UART_LCR 3
-#define UART_DLL 0
-#define UART_DLH 1
-#define LSR_TEMT 0x40
 void uart_report_clock(void)
 {
 #ifdef BOARD_NANO
