@@ -3,6 +3,7 @@
 #include "diskio.h"
 #include "sd.h"
 #include "uart.h"
+#include "osc.h"
 
 static FATFS fs;
 static int mounted;
@@ -177,6 +178,21 @@ int preset_fs_loop_load(int slot, float *l, float *r, uint32_t max_frames, uint3
     preset_fs_root_close();
     if (rc == 0) *frames = n;
     return rc;
+}
+
+/* WAVE.RAW at the card root: one single cycle of float32, loaded into the
+ * CUSTOM wavetable. Absent file (or too short) leaves the CUSTOM default. */
+int preset_fs_wavetable_load(void)
+{
+    static float buf[1024];
+    if (preset_fs_root_open("/WAVE.RAW", 0) != 0) return -1;
+    unsigned got = 0;
+    if (preset_fs_root_read(buf, sizeof buf, &got) != 0) { preset_fs_root_close(); return -1; }
+    preset_fs_root_close();
+    int n = (int)(got / sizeof(float));
+    if (n < 8) return -2;
+    osc_wavetable_set_custom(buf, n);
+    return 0;
 }
 
 void preset_fs_info(void)

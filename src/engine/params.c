@@ -1,13 +1,14 @@
 #include "params.h"
 #include "dsp.h"
 
-const char *const page_names[PAGE_COUNT] = { "OSC", "FILTER", "SPACE", "AMP", "MODES" };
+const char *const page_names[PAGE_COUNT] = { "OSC", "FILTER", "SPACE", "AMP", "MODES", "WAVE" };
 
 static const char *const fmode_labels[] = { "LP", "BP" };
 static const char *const onoff_labels[] = { "OFF", "ON" };
 static const char *const sync_labels[] = { "OFF", "MIDI" };
 static const char *const stack_labels[] = { "UNISON", "OCTAVES", "FIFTHS", "ORGAN" };
 static const char *const rev_mode_labels[] = { "HALL", "SHIM OCT", "SHIM 5TH", "SUB OCT", "FREEZE" };
+static const char *const wave_labels[] = { "ANALOG", "SAW", "SQUARE", "ORGAN", "CUSTOM" };
 /* filter-LFO cycle length */
 static const char *const lfo_div_labels[] = { "FREE", "1/4", "1/2", "1 BT", "2 BT", "1 BAR", "2 BAR", "4 BAR", "8 BAR" };
 static const float lfo_div_beats[] = { 0, 0.25f, 0.5f, 1, 2, 4, 8, 16, 32 };
@@ -49,6 +50,7 @@ static const param_desc_t table[P_COUNT] = {
     [P_STACK]      = { "STACK",   0.0f,   3.0f,    0.0f,  CURVE_ENUM, UNIT_NONE,  stack_labels, 0.34f },
     [P_REV_MODE]   = { "REV MODE", 0.0f,  4.0f,    0.0f,  CURVE_ENUM, UNIT_NONE,  rev_mode_labels, 0.25f },
     [P_SHIMMER]    = { "SHIMMER", 0.0f,   1.0f,    0.5f,  CURVE_LIN,  UNIT_PCT,   0, 0.01f },
+    [P_WAVE]       = { "WAVE",    0.0f,   4.0f,    0.0f,  CURVE_ENUM, UNIT_NONE,  wave_labels, 0.25f },
 };
 
 const param_desc_t *param_desc(int id) { return &table[id]; }

@@ -352,6 +352,7 @@ void engine_init(float sr)
     E.sr = sr;
     E.inv_sr = 1.0f / sr;
     E.rng = 0x12345678u;
+    osc_wavetable_init();
     for (int i = 0; i < P_COUNT; i++) E.p[i] = param_desc(i)->def;
     for (int i = 0; i < ENGINE_VOICES; i++) {
         E.v[i].note = -1; E.v[i].env = 0; E.v[i].gate = 0; E.v[i].pending = -1;
@@ -384,6 +385,7 @@ static void voice_control(voice_t *v, int nosc)
     float spread = E.p[P_SPREAD];
     float half = (float)(nosc - 1) * 0.5f;
     int sm = (int)E.p[P_STACK];
+    int wave = (int)E.p[P_WAVE];
     const osc_stack_t *st = &stacks[sm < 0 || sm > 3 ? 0 : sm];
     for (int k = 0; k < nosc; k++) {
         int si = k % st->n;
@@ -402,6 +404,7 @@ static void voice_control(voice_t *v, int nosc)
         float a = (pan + 1.0f) * 0.125f;                                /* 0..0.25 */
         v->bank.gl[k] = w * dsp_sin1(0.25f - a);
         v->bank.gr[k] = w * dsp_sin1(a);
+        v->bank.wt[k] = wave > 0 ? osc_wavetable_level(wave - 1, v->bank.inc[k]) : 0;
     }
     v->bank.n = nosc;
     v->sub_inc = (uint32_t)(f0 * 0.5f * E.inv_sr * 4294967296.0f);

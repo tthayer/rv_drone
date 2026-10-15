@@ -8,7 +8,8 @@
  *  6. FREEZE holds the reverb; HALL lets it die away.
  *  7. Velocity scales the note level; velocity 0 is a note off.
  *  8. Delay length: the echo lands at the set time, including 30 s.
- *  9. Loop recorder: record -> loop -> periodic -> overdub. */
+ *  9. Loop recorder: record -> loop -> periodic -> overdub.
+ * 10. Wavetable oscillator: band-limited (no harmonics above Nyquist). */
 #include <math.h>
 #include <stdio.h>
 #include "dsp.h"
@@ -280,7 +281,28 @@ int main(void)
         CHECK(engine_loop_len() == (uint32_t)rec, "overdub changed the length to %u", engine_loop_len());
     }
 
+    /* 10. Wavetable oscillator: the SAW table is band-limited, so a high note
+     *     has no harmonics above its MIP level's cap (8 at note 100). */
+    {
+        engine_init(SR);
+        engine_set_param(P_LATCH, 0);
+        engine_set_param(P_WAVE, 1);                 /* SAW wavetable */
+        engine_set_param(P_OSCS, 1); engine_set_param(P_DETUNE, 0); engine_set_param(P_DRIFT, 0);
+        engine_set_param(P_SHAPE, 0); engine_set_param(P_SUB, 0); engine_set_param(P_SPREAD, 0);
+        engine_set_param(P_CUTOFF, 20000); engine_set_param(P_FMOD_DEPTH, 0); engine_set_param(P_DRIVE, 0);
+        engine_set_param(P_ATTACK, 0.005f); engine_set_param(P_RELEASE, 0.1f);
+        engine_set_param(P_CHORUS, 0); engine_set_param(P_DLY_MIX, 0); engine_set_param(P_REV_MIX, 0);
+        engine_set_param(P_VOLUME, 1.0f);
+        engine_note_on(100, 127);
+        for (int s = 0; s < SR; s += 32) engine_render(tl + s, tr + s, 32);
+        double f0 = 440.0 * pow(2.0, (100 - 69) / 12.0);
+        double lo = tone(tl, 0, 2 * f0);             /* inside the band */
+        double hi = tone(tl, 0, 10 * f0);            /* above the level's 8 harmonics */
+        CHECK(lo > 1e-3, "wavetable: no energy at 2*f0 (%.4g)", lo);
+        CHECK(hi < 0.1 * lo, "wavetable: aliasing (2f0 %.4g, 10f0 %.4g)", lo, hi);
+    }
+
     if (fails) printf("test_engine: %d FAILED\n", fails);
-    else printf("test_engine: all passed (exp2 %.1e, %d steals faded, STACK partials, shimmer, freeze, velocity, delay, loop ok)\n", worst, steals);
+    else printf("test_engine: all passed (exp2 %.1e, %d steals faded, STACK partials, shimmer, freeze, velocity, delay, loop, wavetable ok)\n", worst, steals);
     return fails != 0;
 }
