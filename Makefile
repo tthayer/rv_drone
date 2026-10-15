@@ -124,14 +124,13 @@ usbboot: fip
 	$(if $(RESET_PORT),stty -f $(RESET_PORT) 115200 raw -echo clocal && printf '\022' > $(RESET_PORT))
 	$(PYTHON) tools/usbboot.py build/nano/fip.bin --magic $(USB_DL_MAGIC)
 
-# Update the boot image on the SD card without removing it: push build/nano/fip.bin
-# to a running Nano over UART0 (the console 'u' command). The Nano stages it as
-# /fip.new, verifies it, swaps it in over /fip.bin and reboots. UPLOAD_PORT defaults
-# to RESET_PORT (the same UART0 device usbboot resets).
+# Update the boot image on the SD card without removing it: tools/nano.py flash
+# pushes build/nano/fip.bin over UART0 (the console 'u' command); the Nano stages
+# /fip.new, verifies it, swaps /fip.bin and reboots, retrying a dropped byte.
+# UPLOAD_PORT is optional (the tool auto-detects; empty defaults to RESET_PORT's).
 UPLOAD_PORT ?= $(RESET_PORT)
 upload: fip
-	@[ -n "$(UPLOAD_PORT)" ] || { echo "set UPLOAD_PORT (UART0 serial device, e.g. /dev/cu.usbserial-XXXX)"; exit 1; }
-	$(PYTHON) tools/upload-fip.py build/nano/fip.bin --port $(UPLOAD_PORT)
+	$(PYTHON) tools/nano.py flash build/nano/fip.bin $(if $(UPLOAD_PORT),--port $(UPLOAD_PORT),)
 
 # Pico firmware (Pico A audio, Pico B panel). Needs:
 #   tools/get-pico-sdk.sh, arm-none-eabi-gcc with newlib, ninja, cmake, picotool.

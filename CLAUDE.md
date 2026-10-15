@@ -26,7 +26,7 @@ The pin tables in `docs/ARCHITECTURE.md` are the source of truth; the diagrams m
   Needs the running image to have the `u` command; stages `/fip.new`, verifies, swaps `/fip.bin`, reboots.
   Interrupts audio; raises UART0 to divisor 2 (781250 baud) by default and reports the result at the console
   baud. `EXTRA_CFLAGS=-DFW_UPLOAD_DIV=N` changes it (1 = 1562500, 4 = 390625). The sender auto-retries a
-  dropped byte (`tools/upload-fip.py --retries`, default 3).
+  dropped byte (`tools/nano.py flash --retries`, default 3).
 - Pico A: `make pico-flash-audio PICO_A_SER=0608CFFAD05BCF10`
 - Pico B: `make pico-flash-panel PICO_B_SER=53ADB4FD5CB7055B`
 - Host tests: `make test-link test-panel test-presets test-engine`. Emulator: `make emu` and `make emu-wav`.

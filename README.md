@@ -297,7 +297,9 @@ can't hold its return path cleanly; the divisor is build-time:
 
 The transfer has no flow control, so a slow card write can drop a byte and
 abort it (safely — the old `/fip.bin` is untouched until the staged copy
-verifies). `tools/upload-fip.py` retries automatically (`--retries`, default 3).
+verifies). `tools/nano.py flash` retries automatically (`--retries`, default 3)
+and waits out the reboot; it also reads the console (`nano.py console`) and waits
+for the board to boot (`nano.py wait`).
 
 Bootstrap: an older image without the command echoes `rx: 'u'` instead of
 starting the transfer. Boot that image once the old way (SD card or
