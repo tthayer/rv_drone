@@ -342,6 +342,10 @@ are converted on load to the same oscillator count.
   | 16 voices × 16 osc, scalar, uncapped | ~1795 µs | 134 %, not real-time, hence the scalar cap of 7 |
   | 16 voices × 16 osc requested, scalar, capped at 7 | ~1001 µs | 75 % |
 
+  The cap also applies to **wavetable** oscillators (`WAVE` other than ANALOG)
+  even with RVV enabled, since they run the scalar lookup on both kernels:
+  wavetable + CONV reverb measured 1880 µs (141 %) uncapped, ~1000 µs capped.
+
   The effects cost about 140 µs per block whatever the voice count. That figure
   is inferred from the measurements above, not measured on its own. The
   console prints the render average, maximum and load each second, and the

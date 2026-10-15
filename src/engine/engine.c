@@ -490,9 +490,12 @@ static void render_block(float *outl, float *outr, int n)
     if (nosc > MAX_OSC) nosc = MAX_OSC;
     /* Without the RVV kernels, 16 voices x 16 oscillators takes ~1800 us per block
      * on the C906, over the 1333 us real-time budget. Plain C stays within budget
-     * up to 7 (measured 976 us), so cap there. The host emulator is unaffected. */
+     * up to 7 (measured 976 us), so cap there. The host emulator is unaffected.
+     * A wavetable oscillator (WAVE != ANALOG) runs the scalar lookup on both
+     * kernels - XTheadVector has no indexed load - so it costs the same and takes
+     * the same cap: wavetable + CONV reverb measured 1880 us (141%) uncapped. */
 #ifdef ENGINE_RVV
-    if (!E.simd && nosc > SCALAR_MAX_OSC) nosc = SCALAR_MAX_OSC;
+    if ((!E.simd || (int)E.p[P_WAVE] > 0) && nosc > SCALAR_MAX_OSC) nosc = SCALAR_MAX_OSC;
 #endif
     float shape = E.p[P_SHAPE], sub = E.p[P_SUB];
     float norm = osc_norm[nosc] * 0.8f;
