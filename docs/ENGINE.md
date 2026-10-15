@@ -535,13 +535,23 @@ are converted on load to the same oscillator count.
 - **Convolution reverb cost** (2026-10-15, Nano, console `r` then `w`, RVV):
   REV MODE = CONV replaces the FDN with the partitioned convolution. Worst case
   (16 voices × 16 osc) is **1131 µs per block, 85 %** of the budget
-  (osc 267, voice 51, chorus 13, delay 7, reverb 530, total 1131). It is
-  real-time, but CONV is the most expensive mode: the convolution adds roughly
-  460 µs over HALL. The cost is arithmetic — a scalar radix-2 FFT plus
-  `CONV_P` complex MACs of length `CONV_N` per block per channel — so a shorter
-  IR (fewer partitions) or a smaller FFT cuts it roughly proportionally.
-  Because the IR is buffered into `CONV_B`-sample blocks, the wet lags the dry
-  by one block (10.7 ms).
+  (osc 267, voice 51, chorus 13, delay 7, reverb 530, total 1131) — the
+  convolution adds roughly 460 µs over HALL. The cost is arithmetic: a scalar
+  radix-2 FFT plus `CONV_P` complex MACs of length `CONV_N` per block per
+  channel, so a shorter IR (fewer partitions) or a smaller FFT cuts it roughly
+  proportionally.
+  - **The partition MACs are spread across blocks.** Doing the whole
+    convolution in the render block where the 512-sample input buffer filled
+    made that one block take ~4-6 ms — the average looked fine (43 %) but the
+    peak starved Pico A ~39 times a second and crackled. `conv_step()` now
+    accumulates one partition every `CONV_B/npart` samples, so a typical block
+    carries a slice. The remaining peak is the boundary block, which still runs
+    the forward FFT (both channels) plus the inverse FFT: **measured max
+    ~2.2 ms** while playing (4 voices), inside Pico A's 3-block (~4 ms) buffer —
+    `underruns 0`, where the unspread version grew them continuously.
+  - Because the IR is buffered into `CONV_B`-sample blocks and the MACs are
+    spread over the following block, the wet lags the dry by **two blocks
+    (21 ms)** — fine for a reverb send.
 
 ## Working on the engine
 
