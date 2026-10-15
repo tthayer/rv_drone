@@ -156,6 +156,32 @@ static int emu_write(const char *name, const char *buf, int len) {
 }
 static const ui_store_t emu_store = { emu_read, emu_write };
 
+/* Loop recorder, same raw float32 format as the Nano's LOOP0n.RAW. */
+#define EMU_LOOP_DIR "build/emu/loops"
+static int emu_loop_save(int slot, const float *l, const float *r, uint32_t frames) {
+    char p[256];
+    mkdir("build", 0755); mkdir("build/emu", 0755); mkdir(EMU_LOOP_DIR, 0755);
+    snprintf(p, sizeof p, EMU_LOOP_DIR "/L%02d.RAW", slot);
+    FILE *f = fopen(p, "wb");
+    if (!f) return -1;
+    int ok = fwrite(l, 4, frames, f) == frames && fwrite(r, 4, frames, f) == frames;
+    return fclose(f) == 0 && ok ? 0 : -1;
+}
+static int emu_loop_load(int slot, float *l, float *r, uint32_t max_frames, uint32_t *frames) {
+    char p[256];
+    snprintf(p, sizeof p, EMU_LOOP_DIR "/L%02d.RAW", slot);
+    FILE *f = fopen(p, "rb");
+    if (!f) return -2;
+    uint32_t n = (uint32_t)fread(l, 4, max_frames, f);
+    uint32_t n2 = (uint32_t)fread(r, 4, max_frames, f);
+    fclose(f);
+    if (n2 < n) n = n2;
+    if (!n) return -3;
+    *frames = n;
+    return 0;
+}
+static const ui_loop_store_t emu_loop_store = { emu_loop_save, emu_loop_load };
+
 static const SDL_Keycode piano[] = { SDLK_z, SDLK_s, SDLK_x, SDLK_d, SDLK_c, SDLK_v, SDLK_g,
                                      SDLK_b, SDLK_h, SDLK_n, SDLK_j, SDLK_m, SDLK_COMMA };
 
@@ -178,6 +204,7 @@ int main(int argc, char **argv) {
     engine_init(SR);
     ui_init();
     ui_set_store(&emu_store);
+    ui_set_loop_store(&emu_loop_store);
     ui_boot_preset();
 
     SDL_AudioSpec want = { .freq = SR, .format = AUDIO_F32SYS, .channels = 2, .samples = 256,

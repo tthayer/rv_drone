@@ -31,6 +31,16 @@ typedef struct {
 } ui_store_t;
 #define UI_PRESET_SLOTS 16
 void ui_set_store(const ui_store_t *store);
+
+/* Loop recorder (LOOPER page). The loop itself lives in the engine; the store
+ * streams it to/from SD. `l`/`r` are the engine's channel buffers, `frames`
+ * long. A NULL store leaves SAVE/LOAD displaying "NO STORE". */
+#define UI_LOOP_SLOTS 8
+typedef struct {
+    int (*save)(int slot, const float *l, const float *r, uint32_t frames);
+    int (*load)(int slot, float *l, float *r, uint32_t max_frames, uint32_t *frames);
+} ui_loop_store_t;
+void ui_set_loop_store(const ui_loop_store_t *store);
 int  ui_preset_load(int slot);     /* 0 ok, -1 no store/card, -2 empty, -3 bad file */
 int  ui_preset_save(int slot);     /* 0 ok, <0 error */
 void ui_boot_preset(void);         /* loads the LAST.TXT slot, if any */

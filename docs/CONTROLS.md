@@ -171,6 +171,23 @@ and size, attack and release. A message confirms each action: `LOADED 03`,
 Loading or saving a slot also makes it the one loaded at the next power-up.
 Presets are text files on the SD card, `/presets/P01.TXT` to `P16.TXT`.
 
+### 7. LOOPER
+
+| Control | Action |
+|---|---|
+| Turn encoder 1 | pick a loop slot, 01–08 |
+| Push encoder 2 | REC — start recording; push again to stop (it loops) |
+| Push encoder 3 | PLAY / STOP |
+| Push encoder 4 | DUB — layer the new input onto the playing loop |
+| Push encoder 5 | SAVE the loop to the slot |
+| Push encoder 6 | LOAD the slot |
+| Push encoder 1 | back to the OSC page |
+
+Records whatever the engine plays (effects included) into a long buffer — up to
+about 87 s, from the spare DDR. The header shows the state and length (`REC`,
+`PLAY`, `DUB`, `OFF`). Pushing REC again clears and re-records. Loops are raw
+float32 files `LOOP01.RAW`–`LOOP08.RAW` on the SD card.
+
 ## MIDI
 
 The MIDI input is the DIN socket on the Unit MIDI.

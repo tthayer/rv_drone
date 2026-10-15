@@ -28,6 +28,21 @@ void  engine_clock(int kind, uint32_t t_us);
 float engine_bpm(void);                       /* 0 = no clock in the last 0.5 s */
 int   engine_clock_running(void);             /* between Start/Continue and Stop */
 
+/* Loop recorder (spare DDR): records the post-effects output, loops it, and
+ * layers overdubs. One buffer of engine_loop_capacity() frames per channel. */
+enum { LOOP_REC, LOOP_PLAY, LOOP_DUB, LOOP_STOP, LOOP_CLEAR };   /* actions */
+enum { LOOP_OFF, LOOP_RECORDING, LOOP_PLAYING, LOOP_OVERDUB };   /* states  */
+void     engine_loop_action(int action);
+int      engine_loop_state(void);
+uint32_t engine_loop_len(void);              /* recorded frames (0 = empty) */
+uint32_t engine_loop_pos(void);              /* play head, frames */
+uint32_t engine_loop_capacity(void);         /* max frames */
+/* Direct buffer access, for streaming a loop to/from SD (ch 0 = L, 1 = R;
+ * engine_loop_len() frames valid). engine_loop_set_len() after a load. */
+const float *engine_loop_data(int ch);
+float       *engine_loop_edit(int ch);
+void         engine_loop_set_len(uint32_t frames);
+
 /* Per-stage render time, in the timer's ticks, accumulated since the last take.
  * osc = oscillator banks; voice = sub + filter + drive + envelope; then the
  * effect passes; total = whole engine_render(), frames = frames rendered. */

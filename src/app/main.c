@@ -310,6 +310,8 @@ void main(uint64_t hartid, uint64_t fdt)
 #ifdef BOARD_HAS_SD
     sd_set_idle_hook(audio_link_poll);         /* keep audio fed during SD waits */
     ui_set_store(&preset_fs_store);
+    { static const ui_loop_store_t ls = { preset_fs_loop_save, preset_fs_loop_load };
+      ui_set_loop_store(&ls); }
     preset_fs_info();
     ui_boot_preset();
     uart_puts("m8: 'i' = SD info, 'F' twice = format card, 'S'/'L' = save/load slot 1, "

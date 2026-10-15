@@ -31,6 +31,7 @@ describes what it does, how it is driven, and how it runs on the Nano.
   --> feedback delay (stereo, cross-fed, damped, DELAY/FEEDBACK/DLY MIX)
   --> FDN reverb (8 lines, SIZE/DAMP/REVERB; REV MODE: hall, shimmer, freeze)
         ^-- pitch shifter (+12 / +7 / -12 st) on the wet sum, fed back (SHIMMER)
+  --> loop recorder (capture the post-effects signal, add the loop playback)
   --> volume (VOLUME^2, smoothed) --> soft clip --> L/R float, about +-1
 ```
 
@@ -188,6 +189,27 @@ now folded into the voice-path gain.
     Presets saved before then play about 11 dB quieter; the default VOLUME
     moved from 70 % to 85 % to compensate.
 
+## Loop recorder
+
+The LOOPER page records the post-effects output into a large buffer, loops it,
+and layers overdubs — spare DDR, like the long delay. RAM is the only real
+cost; the buffer streams sequentially.
+
+- One buffer of 2^22 frames per channel (~87 s, 32 MiB stereo). The first
+  record pass sets the length (stopped when REC is toggled off); left running,
+  the buffer fills over ~87 s and then plays.
+- **Capture point:** the post-effects signal, just before the master volume
+  (`l`/`r` after the reverb in the signal flow above). Playback is summed back
+  at the same point, so a loop sits at the same level as the live signal.
+- **Overdub** plays the loop and adds the new input on top (`buf += in`), so
+  passes layer without runaway feedback.
+- **Transport & UI:** the LOOPER page's switches are REC, PLAY/STOP and DUB;
+  encoder 1 picks the slot, and SAVE/LOAD stream the loop to/from the SD card
+  (`LOOP0n.RAW`, raw float32: an L plane then an R plane; `build/emu/loops/` in
+  the emulator). Starting REC again clears and re-records.
+- **CPU:** one read and one write per sample per channel, streaming from DDR —
+  negligible next to the delay.
+
 ## MIDI clock follower
 
 The MicroFreak (or any MIDI clock master) sets the tempo. Pico B timestamps
@@ -321,6 +343,7 @@ are converted on load to the same oscillator count.
   | Buffer | Size |
   |---|---|
   | delay | 2 × 8388608 floats = 64 MiB |
+  | loop | 2 × 4194304 floats = 32 MiB |
   | reverb | 8 × 8192 floats = 256 KiB |
   | shimmer | 8192 floats = 32 KiB |
   | chorus | 2 × 2048 floats = 16 KiB |

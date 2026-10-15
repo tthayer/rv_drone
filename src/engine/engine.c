@@ -8,6 +8,7 @@
 #define MAX_OSC     OSC_MAX
 #define CTRL        32                  /* control-rate block */
 #define DLY_N       8388608             /* 2^23 samples ~ 175 s at 48 kHz (64 MiB stereo), power of 2 */
+#define LOOP_N      4194304             /* loop recorder: 2^22 samples ~ 87 s (33 MiB stereo) */
 #define CHO_N       2048
 #define REV_LINES   8
 #define REV_N       8192
@@ -74,6 +75,12 @@ static struct {
     float dly_pad[DLY_PAD];
     float dly_r[DLY_N];
     uint32_t dly_w;
+    /* loop recorder */
+    float loop_l[LOOP_N];
+    float loop_pad[DLY_PAD];
+    float loop_r[LOOP_N];
+    uint32_t loop_len, loop_pos;
+    int loop_state;
     float dly_lp_l, dly_lp_r;
     float rev[REV_LINES][REV_N + REV_PAD];
     uint32_t rev_w;
@@ -284,6 +291,46 @@ void engine_voice_info(int i, int *note, float *env)
     if (i < 0 || i >= ENGINE_VOICES) { *note = -1; *env = 0.0f; return; }
     *note = E.v[i].note;
     *env = E.v[i].env;
+}
+
+/* ---- loop recorder (see engine.h) ---- */
+void engine_loop_action(int action)
+{
+    switch (action) {
+    case LOOP_REC:
+        if (E.loop_state == LOOP_RECORDING) {           /* stop: keep and loop */
+            E.loop_state = E.loop_len ? LOOP_PLAYING : LOOP_OFF;
+            E.loop_pos = 0;
+        } else {                                         /* (re)start recording */
+            E.loop_len = 0; E.loop_pos = 0; E.loop_state = LOOP_RECORDING;
+        }
+        break;
+    case LOOP_PLAY:
+        if (E.loop_len) { E.loop_pos = 0; E.loop_state = LOOP_PLAYING; }
+        break;
+    case LOOP_DUB:
+        if (E.loop_len) { E.loop_pos = 0; E.loop_state = LOOP_OVERDUB; }
+        break;
+    case LOOP_STOP:
+        E.loop_state = LOOP_OFF; E.loop_pos = 0;
+        break;
+    case LOOP_CLEAR:
+        E.loop_len = 0; E.loop_pos = 0; E.loop_state = LOOP_OFF;
+        break;
+    }
+}
+
+int engine_loop_state(void) { return E.loop_state; }
+uint32_t engine_loop_len(void) { return E.loop_len; }
+uint32_t engine_loop_pos(void) { return E.loop_pos; }
+uint32_t engine_loop_capacity(void) { return LOOP_N; }
+const float *engine_loop_data(int ch) { return ch ? E.loop_r : E.loop_l; }
+float *engine_loop_edit(int ch) { return ch ? E.loop_r : E.loop_l; }
+void engine_loop_set_len(uint32_t f)
+{
+    E.loop_len = f <= LOOP_N ? f : LOOP_N;
+    E.loop_pos = 0;
+    E.loop_state = E.loop_len ? LOOP_PLAYING : LOOP_OFF;
 }
 
 int engine_voices_active(void)
@@ -630,6 +677,31 @@ static void render_block(float *outl, float *outr, int n)
         E.rev_w++;
         l += rmix * wetl * 0.35f;
         r += rmix * wetr * 0.35f;
+        /* Loop recorder: capture the post-effects signal (pre master volume),
+         * then add the loop playback. Overdub sums the new input on top. */
+        if (E.loop_state != LOOP_OFF) {
+            float inl = l, inr = r;
+            uint32_t p = E.loop_pos;
+            if (E.loop_state != LOOP_RECORDING) {
+                l += E.loop_l[p];
+                r += E.loop_r[p];
+            }
+            if (E.loop_state == LOOP_RECORDING) {
+                E.loop_l[p] = inl;
+                E.loop_r[p] = inr;
+            } else if (E.loop_state == LOOP_OVERDUB) {
+                E.loop_l[p] += inl;
+                E.loop_r[p] += inr;
+            }
+            p++;
+            if (E.loop_state == LOOP_RECORDING) {
+                E.loop_len = p;
+                if (p >= LOOP_N) { E.loop_state = LOOP_PLAYING; p = 0; }
+            } else if (p >= E.loop_len) {
+                p = 0;
+            }
+            E.loop_pos = p;
+        }
         E.vol_s += (vol_t - E.vol_s) * 0.001f;
         outl[i] = dsp_tanh(l * E.vol_s * OUT_GAIN);
         outr[i] = dsp_tanh(r * E.vol_s * OUT_GAIN);

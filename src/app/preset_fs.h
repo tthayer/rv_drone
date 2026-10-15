@@ -21,4 +21,9 @@ int preset_fs_root_close(void);
 int preset_fs_root_size(const char *name, uint32_t *size);
 int preset_fs_root_unlink(const char *name);
 int preset_fs_root_rename(const char *from, const char *to);
+
+/* Loop-recorder slots (LOOP0n.RAW at the card root): raw float32, an L plane
+ * then an R plane of `frames` samples each. */
+int preset_fs_loop_save(int slot, const float *l, const float *r, uint32_t frames);
+int preset_fs_loop_load(int slot, float *l, float *r, uint32_t max_frames, uint32_t *frames);
 #endif
