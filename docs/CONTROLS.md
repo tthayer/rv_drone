@@ -176,9 +176,10 @@ Presets are text files on the SD card, `/presets/P01.TXT` to `P16.TXT`.
 The MIDI input is the DIN socket on the Unit MIDI.
 
 - **Channel:** all channels are accepted.
-- **Notes** play voices, up to 16 at once. Velocity is ignored: every note
-  plays at the same level. When all 16 voices are busy, the quietest one fades
-  out over 30 ms and takes the new note.
+- **Notes** play voices, up to 16 at once. Velocity sets the note's level: the
+  envelope peak is velocity/127 (linear, so 1 is about −42 dB and 127 is full
+  scale). A Note On with velocity 0 releases the note. When all 16 voices are
+  busy, the quietest one fades out over 30 ms and takes the new note.
 - **Controllers:**
   - CC 20–49 set the parameters in page order, as listed in the tables above.
   - CC 1, 7, 71, 72, 73, 74, 91 and 93 set the usual synth controls: mod
