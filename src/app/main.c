@@ -217,15 +217,11 @@ static uint64_t render_load_pct(void)
 static void led_init(void)
 {
 #ifdef BOARD_LED_GPIO_BASE
+    /* LED1 off: keep the pad a driven GPIO (as when it was the heartbeat) and
+     * hold it at the LED's off level. The 1 Hz toggle was removed 2026-10-14. */
     REG32(BOARD_LED_FMUX) = BOARD_LED_FMUX_GPIO;
-    REG32(BOARD_LED_GPIO_BASE + 0x04) |= 1u << BOARD_LED_BIT;
-#endif
-}
-
-static void led_toggle(void)
-{
-#ifdef BOARD_LED_GPIO_BASE
-    REG32(BOARD_LED_GPIO_BASE + 0x00) ^= 1u << BOARD_LED_BIT;
+    REG32(BOARD_LED_GPIO_BASE + 0x04) |= 1u << BOARD_LED_BIT;       /* output */
+    REG32(BOARD_LED_GPIO_BASE + 0x00) &= ~(1u << BOARD_LED_BIT);    /* drive low */
 #endif
 }
 
@@ -337,7 +333,6 @@ void main(uint64_t hartid, uint64_t fdt)
         panel_link_poll();
         if (t / BOARD_TICK_HZ != last_sec) {
             last_sec = t / BOARD_TICK_HZ;
-            led_toggle();
             uart_puts("tick ");
             uart_put_dec(t);
             uart_puts(" time ");
