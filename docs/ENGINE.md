@@ -113,8 +113,9 @@ into control blocks internally.
   - Synced to MIDI clock, see below. Voices are then offset by ¼ cycle.
 - **Drive:** `tanh_approx(x × (1 + 3·DRIVE)) / (1 + DRIVE)` on each channel
   after the filter.
-- **Envelope:** a one-pole glide towards 1 (gate on) or 0 (gate off). The
-  per-sample coefficient 1 − e^(−1/τ) is computed with a series expansion for
+- **Envelope:** a one-pole glide towards its target: the note's velocity gain
+  (the MIDI velocity / 127, so 0.008…1) while the gate is on, or 0 while it is
+  off. The per-sample coefficient 1 − e^(−1/τ) is computed with a series expansion for
   long times, because 1 − 2^(−tiny) loses all precision. Until 2026-10-07
   `dsp_exp2`'s Taylor error made every long ATTACK and RELEASE about 6× too
   short. The time

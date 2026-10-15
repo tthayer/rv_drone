@@ -40,6 +40,7 @@ typedef struct { float ic1, ic2; } svf_t;
 typedef struct {
     int note;                           /* -1 = unused */
     int gate;
+    float vel;                          /* envelope peak (velocity gain, 1/127..1) */
     float env, env_target, env_coef;
     osc_bank_t bank;
     float drift_ph[MAX_OSC], drift_rate[MAX_OSC];
@@ -48,6 +49,7 @@ typedef struct {
     svf_t f[2];
     uint32_t age;
     int pending;                        /* note to start once a steal fade ends, -1 = none */
+    float pending_vel;                  /* velocity gain for that pending note */
 } voice_t;
 
 /* A stolen voice fades to silence over this long before its new note starts,
@@ -189,10 +191,23 @@ void engine_set_param(int id, float value)
 
 float engine_param(int id) { return (id >= 0 && id < P_COUNT) ? E.p[id] : 0.0f; }
 
-static void voice_start(voice_t *v, int note)
+/* Velocity 1..127 -> envelope peak. Linear (about 42 dB) rather than squared:
+ * a squared curve pushes low velocities under the envelope thresholds used
+ * elsewhere (a voice is freed below 1e-4, and 1e-3 bounds the steal fade), so
+ * the quietest note would be treated as already silent. At 1/127 the floor
+ * (about -42 dB) stays clear of both. */
+static float vel_gain(int vel)
+{
+    if (vel < 1) vel = 1;
+    if (vel > 127) vel = 127;
+    return (float)vel * (1.0f / 127.0f);
+}
+
+static void voice_start(voice_t *v, int note, float vel)
 {
     v->note = note;
     v->gate = 1;
+    v->vel = vel;
     v->age = ++E.age;
     if (v->env < 1e-4f) {                          /* fresh voice: new random phases */
         for (int k = 0; k < MAX_OSC; k++) {
@@ -208,6 +223,7 @@ static void voice_start(voice_t *v, int note)
 void engine_note_on(int note, int vel)
 {
     if (vel == 0) { engine_note_off(note); return; }
+    float g = vel_gain(vel);
     int latch = E.p[P_LATCH] >= 0.5f;
     if (latch && E.held == 0) {                    /* first key of a new chord */
         for (int i = 0; i < ENGINE_VOICES; i++) E.v[i].gate = 0;
@@ -216,12 +232,12 @@ void engine_note_on(int note, int vel)
     voice_t *best = 0;
     for (int i = 0; i < ENGINE_VOICES; i++)        /* same note: retrigger it */
         if (E.v[i].note == note && E.v[i].pending < 0) best = &E.v[i];
-    if (best) { voice_start(best, note); return; }
+    if (best) { voice_start(best, note, g); return; }
     for (int i = 0; i < ENGINE_VOICES; i++)        /* already queued on a fading voice */
         if (E.v[i].pending == note) return;
     for (int i = 0; i < ENGINE_VOICES; i++)        /* a silent voice */
         if (E.v[i].pending < 0 && !E.v[i].gate && E.v[i].env < 1e-4f) {
-            voice_start(&E.v[i], note);
+            voice_start(&E.v[i], note, g);
             return;
         }
     /* Steal: the quietest releasing voice, else the quietest held one (ties: oldest).
@@ -236,10 +252,11 @@ void engine_note_on(int note, int vel)
     if (best->env < STEAL_DONE_ENV) {
         best->env = 0.0f;
         best->pending = -1;
-        voice_start(best, note);
+        voice_start(best, note, g);
     } else {
         best->gate = 0;
         best->pending = note;                      /* voice_control() fades it fast */
+        best->pending_vel = g;
     }
 }
 
@@ -341,7 +358,7 @@ static void voice_control(voice_t *v, int nosc)
     }
     v->bank.n = nosc;
     v->sub_inc = (uint32_t)(f0 * 0.5f * E.inv_sr * 4294967296.0f);
-    v->env_target = v->gate ? 1.0f : 0.0f;
+    v->env_target = v->gate ? v->vel : 0.0f;   /* velocity sets the envelope peak */
     v->env_coef = coef_for_time(v->pending >= 0 ? STEAL_FADE_S
                                 : v->gate ? E.p[P_ATTACK] : E.p[P_RELEASE], E.sr);
 }
@@ -493,7 +510,7 @@ static void render_block(float *outl, float *outr, int n)
             int n2 = v->pending;
             v->pending = -1;
             v->env = 0.0f;                                  /* fresh phases, attack from 0 */
-            voice_start(v, n2);
+            voice_start(v, n2, v->pending_vel);
         } else if (!v->gate && v->env < 1e-4f) {
             v->env = 0; v->note = -1;
         }

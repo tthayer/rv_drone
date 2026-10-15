@@ -5,7 +5,8 @@
  *  4. STACK intervals land on the expected partials.
  *  5. Shimmer: each mode adds energy at its shifted pitch, and the feedback
  *     loop decays at its worst-case settings instead of sustaining itself.
- *  6. FREEZE holds the reverb; HALL lets it die away. */
+ *  6. FREEZE holds the reverb; HALL lets it die away.
+ *  7. Velocity scales the note level; velocity 0 is a note off. */
 #include <math.h>
 #include <stdio.h>
 #include "dsp.h"
@@ -82,13 +83,15 @@ int main(void)
     }
     CHECK(worst < 2e-7, "dsp_exp2 rel error %.2e", worst);
 
-    /* 2. release timing: note on (fast attack), off at 0.1 s, RELEASE 4 s */
+    /* 2. release timing: note on (fast attack), off at 0.1 s, RELEASE 4 s.
+     * Full velocity, so the envelope peak is 1.0 and the level is the bare
+     * exponential (velocity scaling is covered in test 7). */
     engine_init(48000);
     engine_set_param(P_LATCH, 0);
     engine_set_param(P_ATTACK, 0.01f);
     engine_set_param(P_RELEASE, 4.0f);
     float l[32], r[32];
-    engine_note_on(60, 100);
+    engine_note_on(60, 127);
     int note; float env = 0;
     for (long s = 0; s < 48000 * 3 / 2; s += 32) {
         if (s == 4800) engine_note_off(60);
@@ -192,7 +195,28 @@ int main(void)
         CHECK(hold[0] < 0.01, "HALL: level still %.3f of its 4 s value at 20 s", hold[0]);
     }
 
+    /* 7. Velocity scales the note level; velocity 0 is a note off. */
+    {
+        const int one = 60;
+        double lev[2];
+        for (int j = 0; j < 2; j++) {
+            int vel = j ? 127 : 20;
+            plain_setup(0, 0.5f, 0.5f);          /* sines, reverb only but REV_MIX off below */
+            engine_set_param(P_REV_MIX, 0);
+            engine_note_on(one, vel);
+            for (int s = 0; s < SR; s += 32) engine_render(tl + s, tr + s, 32);
+            lev[j] = rms(tl, 0);
+        }
+        CHECK(lev[1] > 3.0 * lev[0], "velocity does not scale level (127 %.4g vs 20 %.4g)", lev[1], lev[0]);
+
+        plain_setup(0, 0.5f, 0.5f);
+        engine_set_param(P_REV_MIX, 0);
+        engine_note_on(one, 0);                  /* velocity 0 = note off, must not sound */
+        for (int s = 0; s < SR; s += 32) engine_render(tl + s, tr + s, 32);
+        CHECK(rms(tl, 0) < 1e-6, "velocity 0 sounded (rms %.3g)", rms(tl, 0));
+    }
+
     if (fails) printf("test_engine: %d FAILED\n", fails);
-    else printf("test_engine: all passed (exp2 %.1e, %d steals faded, STACK partials, shimmer, freeze ok)\n", worst, steals);
+    else printf("test_engine: all passed (exp2 %.1e, %d steals faded, STACK partials, shimmer, freeze, velocity ok)\n", worst, steals);
     return fails != 0;
 }
