@@ -29,7 +29,7 @@ describes what it does, how it is driven, and how it runs on the Nano.
  sum of voices x mix gain (1 up to 4 voices, then 2/sqrt(n))
   --> chorus (2 modulated taps per side, CHORUS)
   --> feedback delay (stereo, cross-fed, damped, DELAY/FEEDBACK/DLY MIX)
-  --> FDN reverb (8 lines, SIZE/DAMP/REVERB; REV MODE: hall, shimmer, freeze)
+  --> reverb: FDN (hall, shimmer, freeze) or CONV (partitioned IR convolution)
         ^-- pitch shifter (+12 / +7 / -12 st) on the wet sum, fed back (SHIMMER)
   --> loop recorder (capture the post-effects signal, add the loop playback)
   --> volume (VOLUME^2, smoothed) --> soft clip --> L/R float, about +-1
@@ -169,6 +169,7 @@ now folded into the voice-path gain.
     | SHIM 5TH | the same, shifted up 7 st (×1.4983) |
     | SUB OCT | the same, shifted down 12 st, a darker bloom |
     | FREEZE | input fades out (about 20 ms), line gains go to 0.99998 and damping off, so the current tail holds for minutes; the dry sound still plays on top |
+    | CONV | **convolution reverb**: the send is convolved with an impulse response (uniform partitioned overlap-save FFT, `src/engine/conv.c`, 512-sample blocks) instead of the FDN — a room/plate character. The IR is loaded from `/IR.RAW` at boot (`preset_fs_ir_load`); with no file it uses a built-in synthetic IR (decaying noise, ~170 ms). The IR is normalised by **energy**, so the wet level does not depend on its length — a peak-normalised IR was ~5 dB hot against HALL and saturated the master tanh. |
 
   - **Shimmer pitch shifter:** two taps on a 8192-sample buffer of the wet
     sum (L+R). Each tap's delay sweeps across 4096 samples (85 ms) at a rate
@@ -285,7 +286,7 @@ exactly one step per encoder click, and ENUMs wrap around.
 | MODES | LFO DIV | FREE, 1/4 … 8 BAR | FREE | enum | 45 |
 | MODES | DLY DIV | FREE, 1/16 … 1/2 | FREE | enum | 46 |
 | MODES | STACK | UNISON, OCTAVES, FIFTHS, ORGAN | UNISON | enum | 47 |
-| MODES | REV MODE | HALL, SHIM OCT, SHIM 5TH, SUB OCT, FREEZE | HALL | enum | 48 |
+| MODES | REV MODE | HALL, SHIM OCT, SHIM 5TH, SUB OCT, FREEZE, CONV | HALL | enum | 48 |
 | MODES | SHIMMER | 0–100 % (shimmer modes only) | 50 % | lin | 49 |
 | WAVE | WAVE | ANALOG, SAW, SQUARE, ORGAN, CUSTOM | ANALOG | enum | 50 |
 
@@ -337,8 +338,13 @@ are converted on load to the same oscillator count.
   | 16 voices × 7 osc, RVV | ~390 µs | 29 % |
   | 16 voices × 7 osc, scalar | ~976 µs | 73 % |
   | **16 voices × 16 osc (worst case, console `w`), RVV** | **~648 µs** | **48 %** |
+  | **16 voices × 16 osc, RVV, REV MODE = CONV** | **~1131 µs** | **85 %** |
   | 16 voices × 16 osc, scalar, uncapped | ~1795 µs | 134 %, not real-time, hence the scalar cap of 7 |
   | 16 voices × 16 osc requested, scalar, capped at 7 | ~1001 µs | 75 % |
+
+  The cap also applies to **wavetable** oscillators (`WAVE` other than ANALOG)
+  even with RVV enabled, since they run the scalar lookup on both kernels:
+  wavetable + CONV reverb measured 1880 µs (141 %) uncapped, ~1000 µs capped.
 
   The effects cost about 140 µs per block whatever the voice count. That figure
   is inferred from the measurements above, not measured on its own. The
@@ -355,6 +361,7 @@ are converted on load to the same oscillator count.
   | wavetables | 4 × 10 × 1025 floats = 160 KiB |
   | reverb | 8 × 8192 floats = 256 KiB |
   | shimmer | 8192 floats = 32 KiB |
+  | conv reverb | 2 × (partitioned IR + input spectra) ≈ 1 MiB (issue #4) |
   | chorus | 2 × 2048 floats = 16 KiB |
 
 - **Cores and caches** (SG2002 TRM, Diagram 2.1 "System Framework" and §2.3.1):
@@ -529,6 +536,26 @@ are converted on load to the same oscillator count.
   underruns. The shifter runs as a per-block pre-pass ahead of
   the reverb loop; offsetting its buffer by 9 cache lines made no difference,
   so the cost is arithmetic, not cache aliasing.
+- **Convolution reverb cost** (2026-10-15, Nano, console `r` then `w`, RVV):
+  REV MODE = CONV replaces the FDN with the partitioned convolution. Worst case
+  (16 voices × 16 osc) is **1131 µs per block, 85 %** of the budget
+  (osc 267, voice 51, chorus 13, delay 7, reverb 530, total 1131) — the
+  convolution adds roughly 460 µs over HALL. The cost is arithmetic: a scalar
+  radix-2 FFT plus `CONV_P` complex MACs of length `CONV_N` per block per
+  channel, so a shorter IR (fewer partitions) or a smaller FFT cuts it roughly
+  proportionally.
+  - **The partition MACs are spread across blocks.** Doing the whole
+    convolution in the render block where the 512-sample input buffer filled
+    made that one block take ~4-6 ms — the average looked fine (43 %) but the
+    peak starved Pico A ~39 times a second and crackled. `conv_step()` now
+    accumulates one partition every `CONV_B/npart` samples, so a typical block
+    carries a slice. The remaining peak is the boundary block, which still runs
+    the forward FFT (both channels) plus the inverse FFT: **measured max
+    ~2.2 ms** while playing (4 voices), inside Pico A's 3-block (~4 ms) buffer —
+    `underruns 0`, where the unspread version grew them continuously.
+  - Because the IR is buffered into `CONV_B`-sample blocks and the MACs are
+    spread over the following block, the wet lags the dry by **two blocks
+    (21 ms)** — fine for a reverb send.
 
 ## Working on the engine
 

@@ -43,6 +43,10 @@ const float *engine_loop_data(int ch);
 float       *engine_loop_edit(int ch);
 void         engine_loop_set_len(uint32_t frames);
 
+/* Convolution reverb (REV MODE = CONV): install an impulse response (mono,
+ * `len` samples) in place of the built-in synthetic one. Both channels. */
+void engine_ir_set(const float *ir, int len);
+
 /* Per-stage render time, in the timer's ticks, accumulated since the last take.
  * osc = oscillator banks; voice = sub + filter + drive + envelope; then the
  * effect passes; total = whole engine_render(), frames = frames rendered. */

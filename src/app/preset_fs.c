@@ -4,6 +4,8 @@
 #include "sd.h"
 #include "uart.h"
 #include "osc.h"
+#include "engine.h"
+#include "conv.h"
 
 static FATFS fs;
 static int mounted;
@@ -192,6 +194,21 @@ int preset_fs_wavetable_load(void)
     int n = (int)(got / sizeof(float));
     if (n < 8) return -2;
     osc_wavetable_set_custom(buf, n);
+    return 0;
+}
+
+/* IR.RAW at the card root: a mono float32 impulse response, normalised to peak
+ * 1 and installed into the CONV reverb. Absent/short file keeps the built-in. */
+int preset_fs_ir_load(void)
+{
+    static float buf[CONV_P * CONV_B];
+    if (preset_fs_root_open("/IR.RAW", 0) != 0) return -1;
+    unsigned got = 0;
+    if (preset_fs_root_read(buf, sizeof buf, &got) != 0) { preset_fs_root_close(); return -1; }
+    preset_fs_root_close();
+    int n = (int)(got / sizeof(float));
+    if (n < 8) return -2;
+    engine_ir_set(buf, n);          /* the engine normalises by energy */
     return 0;
 }
 

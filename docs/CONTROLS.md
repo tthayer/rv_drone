@@ -129,7 +129,7 @@ playing normally or from a sequencer.
 | 2 | LFO DIV | FREE, 1/4, 1/2, 1 BT, 2 BT, 1 BAR, 2 BAR, 4 BAR, 8 BAR [FREE] | one filter-LFO cycle per division | 45 |
 | 3 | DLY DIV | FREE, 1/16, 1/8, 1/8., 1/4, 1/4., 1/2 [FREE] | delay time as a note value | 46 |
 | 4 | STACK | UNISON, OCTAVES, FIFTHS, ORGAN [UNISON] | intervals the oscillators are tuned to | 47 |
-| 5 | REV MODE | HALL, SHIM OCT, SHIM 5TH, SUB OCT, FREEZE [HALL] | reverb character (below) | 48 |
+| 5 | REV MODE | HALL, SHIM OCT, SHIM 5TH, SUB OCT, FREEZE, CONV [HALL] | reverb character (below) | 48 |
 | 6 | SHIMMER | 0–100 % [50 %] | strength of the shimmer modes | 49 |
 
 **Clock:** with SYNC on MIDI and a clock coming in, LFO DIV and DLY DIV lock
@@ -149,6 +149,7 @@ footages). UNISON keeps them all on the note. It works best with more OSCS.
 | SHIM 5TH | the same, a fifth up |
 | SUB OCT | the same, an octave down: a darker, lower bloom |
 | FREEZE | the reverb stops taking new sound and holds its current tail for minutes; whatever you play next sounds dry on top |
+| CONV | a **convolution reverb** — the send is convolved with an impulse response (partitioned FFT), a room/plate character. Its impulse response is `/IR.RAW` on the SD card (with no file, a built-in synthetic IR). |
 
 SHIMMER only acts in the three shimmer modes. Larger SIZE makes the shimmer
 longer. To use FREEZE, play the chord with REV MODE on HALL, then switch to

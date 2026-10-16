@@ -29,4 +29,7 @@ int preset_fs_loop_load(int slot, float *l, float *r, uint32_t max_frames, uint3
 
 /* WAVE.RAW (one float32 cycle) into the CUSTOM wavetable; 0 ok. */
 int preset_fs_wavetable_load(void);
+
+/* IR.RAW (a mono float32 impulse response) into the CONV reverb; 0 ok. */
+int preset_fs_ir_load(void);
 #endif

@@ -9,12 +9,17 @@
  *  7. Velocity scales the note level; velocity 0 is a note off.
  *  8. Delay length: the echo lands at the set time, including 30 s.
  *  9. Loop recorder: record -> loop -> periodic -> overdub.
- * 10. Wavetable oscillator: band-limited (no harmonics above Nyquist). */
+ * 10. Wavetable oscillator: band-limited (no harmonics above Nyquist).
+ * 11. FFT: round-trip identity; an impulse transforms to a flat spectrum.
+ * 12. Convolution: partitioned FFT convolution matches a direct FIR.
+ * 13. Convolution reverb (REV MODE = CONV): a burst leaves a decaying tail. */
 #include <math.h>
 #include <stdio.h>
 #include "dsp.h"
 #include "engine.h"
 #include "params.h"
+#include "fft.h"
+#include "conv.h"
 
 static int fails;
 #define CHECK(c, ...) do { if (!(c)) { printf("FAIL: "); printf(__VA_ARGS__); printf("\n"); fails++; } } while (0)
@@ -302,7 +307,113 @@ int main(void)
         CHECK(hi < 0.1 * lo, "wavetable: aliasing (2f0 %.4g, 10f0 %.4g)", lo, hi);
     }
 
+    /* 11. FFT: fft -> ifft is the identity, and an impulse transforms to a flat
+     *     spectrum (twiddle error from dsp_sin1 bounds the tolerance). */
+    {
+        fft_init();
+        const int n = 1024;
+        static float re[FFT_MAX], im[FFT_MAX], sr[FFT_MAX];
+        for (int i = 0; i < n; i++) {
+            re[i] = ((float)((i * 37) % 101) / 50.0f) - 1.0f;      /* -1..1, deterministic */
+            im[i] = 0.0f;
+            sr[i] = re[i];
+        }
+        fft(re, im, n, 0);
+        fft(re, im, n, 1);
+        float err = 0;
+        for (int i = 0; i < n; i++) {
+            float e = re[i] - sr[i]; if (e < 0) e = -e; if (e > err) err = e;
+            if (im[i] < 0) { float q = -im[i]; if (q > err) err = q; } else if (im[i] > err) err = im[i];
+        }
+        CHECK(err < 0.02f, "FFT round trip error %.4g", err);
+
+        for (int i = 0; i < n; i++) { re[i] = 0.0f; im[i] = 0.0f; }
+        re[0] = 1.0f;
+        fft(re, im, n, 0);
+        float flat = 0;
+        for (int k = 0; k < n; k++) {
+            float e = re[k] - 1.0f; if (e < 0) e = -e; if (e > flat) flat = e;
+            if (im[k] < 0) { float q = -im[k]; if (q > flat) flat = q; } else if (im[k] > flat) flat = im[k];
+        }
+        CHECK(flat < 0.02f, "FFT impulse not flat (max dev %.4g)", flat);
+    }
+
+    /* 12. Convolution: partitioned FFT convolution == direct FIR. */
+    {
+        static conv_t c;
+        static float ir[1000], x[CONV_B * 6], out[CONV_B];
+        fft_init();
+        for (int i = 0; i < 1000; i++) ir[i] = (float)((i * 13) % 7 - 3) * 0.01f;
+        for (int i = 0; i < CONV_B * 6; i++) x[i] = (float)((i * 29) % 17 - 8) * 0.05f;
+        conv_init(&c, ir, 1000);
+        float maxerr = 0;
+        for (int blk = 0; blk < 6; blk++) {
+            conv_process(&c, x + blk * CONV_B, out);
+            if (blk < 2) continue;              /* the output lags the input by 2 blocks */
+            int base = (blk - 2) * CONV_B;
+            for (int j = 0; j < CONV_B; j++) {
+                float s = 0;
+                for (int k = 0; k < 1000; k++) {
+                    int idx = base + j - k;
+                    if (idx >= 0) s += ir[k] * x[idx];
+                }
+                float e = out[j] - s; if (e < 0) e = -e; if (e > maxerr) maxerr = e;
+            }
+        }
+        CHECK(maxerr < 5e-3f, "partitioned convolution vs direct FIR: max err %.4g", maxerr);
+    }
+
+    /* 13. Convolution reverb (REV MODE = CONV): a short burst leaves a decaying
+     *     tail after the dry note is gone. */
+    {
+        engine_init(SR);
+        engine_set_param(P_LATCH, 0);
+        engine_set_param(P_ATTACK, 0.002f); engine_set_param(P_RELEASE, 0.005f);
+        engine_set_param(P_OSCS, 3); engine_set_param(P_DETUNE, 0); engine_set_param(P_DRIFT, 0);
+        engine_set_param(P_SHAPE, 0); engine_set_param(P_SUB, 0); engine_set_param(P_SPREAD, 0);
+        engine_set_param(P_CUTOFF, 12000); engine_set_param(P_FMOD_DEPTH, 0); engine_set_param(P_DRIVE, 0);
+        engine_set_param(P_CHORUS, 0); engine_set_param(P_DLY_MIX, 0);
+        engine_set_param(P_REV_MIX, 1.0f); engine_set_param(P_REV_MODE, 5);   /* CONV */
+        engine_note_on(60, 127);
+        for (int s = 0; s < SR; s += 32) {
+            if (s >= 32 && s < 64) engine_note_off(60);
+            engine_render(tl + s, tr + s, 32);
+        }
+        double tail = 0;                                   /* [0.05 s, 0.2 s] */
+        for (int i = SR / 20; i < SR / 5; i++) tail += (double)tl[i] * tl[i];
+        CHECK(tail > 1e-3, "CONV reverb: no tail after the note (%.3g)", tail);
+    }
+
+    /* 14. CONV reverb level: the IR is energy-normalised, so a full-wet CONV
+     *     sits near HALL's level (a peak-normalised IR was ~5 dB hot and
+     *     saturated the master tanh). */
+    {
+        static const int chord[4] = { 48, 52, 55, 60 };
+        float pk[2];
+        for (int mi = 0; mi < 2; mi++) {
+            engine_init(SR);
+            engine_set_param(P_LATCH, 0);
+            engine_set_param(P_ATTACK, 0.002f); engine_set_param(P_RELEASE, 0.004f);
+            engine_set_param(P_OSCS, 1); engine_set_param(P_DETUNE, 0); engine_set_param(P_DRIFT, 0);
+            engine_set_param(P_SHAPE, 0); engine_set_param(P_SUB, 0); engine_set_param(P_SPREAD, 0);
+            engine_set_param(P_CUTOFF, 12000); engine_set_param(P_FMOD_DEPTH, 0); engine_set_param(P_DRIVE, 0);
+            engine_set_param(P_CHORUS, 0); engine_set_param(P_DLY_MIX, 0);
+            engine_set_param(P_REV_SIZE, 0.75f); engine_set_param(P_DAMP, 0.4f);
+            engine_set_param(P_REV_MIX, 1.0f);
+            engine_set_param(P_REV_MODE, mi == 0 ? 0.0f : 5.0f);   /* HALL / CONV */
+            for (int i = 0; i < 4; i++) engine_note_on(chord[i], 100);
+            for (int s = 0; s < SR / 2; s += 32) engine_render(tl + s, tr + s, 32);
+            float m = 0.0f;
+            for (int i = SR / 4; i < SR / 2; i++) {
+                float a = tl[i] < 0 ? -tl[i] : tl[i];
+                if (a > m) m = a;
+            }
+            pk[mi] = m;
+        }
+        CHECK(pk[1] < pk[0] * 1.5f, "CONV reverb is too hot vs HALL (%.3f vs %.3f)", pk[1], pk[0]);
+    }
+
     if (fails) printf("test_engine: %d FAILED\n", fails);
-    else printf("test_engine: all passed (exp2 %.1e, %d steals faded, STACK partials, shimmer, freeze, velocity, delay, loop, wavetable ok)\n", worst, steals);
+    else printf("test_engine: all passed (exp2 %.1e, %d steals faded, STACK partials, shimmer, freeze, velocity, delay, loop, wavetable, fft, conv, conv-reverb, conv-level ok)\n", worst, steals);
     return fails != 0;
 }

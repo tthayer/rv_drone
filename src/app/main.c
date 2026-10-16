@@ -126,6 +126,8 @@ static int simd_selftest(void)
         a.idt[k] = 1.0f / dt;
         a.gl[k] = 0.3f + 0.1f * (float)k;
         a.gr[k] = 1.0f - a.gl[k];
+        a.wt[k] = NULL;             /* analytic path: test the RVV kernel (a
+                                     * wild pointer here used to fault at boot) */
     }
     b = a;
     float l1[64] = { 0 }, r1[64] = { 0 }, l2[64] = { 0 }, r2[64] = { 0 };
@@ -310,6 +312,7 @@ void main(uint64_t hartid, uint64_t fdt)
       ui_set_loop_store(&ls); }
     preset_fs_info();
     if (preset_fs_wavetable_load() == 0) uart_puts("wave: WAVE.RAW loaded into CUSTOM\n");
+    if (preset_fs_ir_load() == 0) uart_puts("ir: IR.RAW loaded into CONV\n");
     ui_boot_preset();
     uart_puts("m8: 'i' = SD info, 'F' twice = format card, 'S'/'L' = save/load slot 1, "
               "'u' = firmware update\n");
@@ -436,8 +439,9 @@ void main(uint64_t hartid, uint64_t fdt)
                 continue;
             }
             if (c == 'r') {                        /* cycle REV MODE (via the UI, CC 48) */
-                int m = ((int)engine_param(P_REV_MODE) + 1) % 5;
-                uint8_t cc[3] = { 0xB0, 20 + P_REV_MODE, (uint8_t)((m * 127 + 2) / 4) };
+                int nv = (int)(param_desc(P_REV_MODE)->max - param_desc(P_REV_MODE)->min) + 1;
+                int m = ((int)engine_param(P_REV_MODE) + 1) % nv;
+                uint8_t cc[3] = { 0xB0, 20 + P_REV_MODE, (uint8_t)((m * 127 + (nv - 1) / 2) / (nv - 1)) };
                 ui_midi(cc, 3, 0);
                 char v[16];
                 param_format(P_REV_MODE, engine_param(P_REV_MODE), v);
